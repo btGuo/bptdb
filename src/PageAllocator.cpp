@@ -39,7 +39,7 @@ pgid_t PageAllocator::allocPage(u32 len) {
     }
     auto ret = it->pos;
     if(it->len == len) {
-        std::memmove(it, it + 1, end - it - 1);
+        std::memmove(it, it + 1, (end - it - 1) * sizeof(Elem));
         hdr->size -= 1;
         hdr->bytes -= sizeof(Elem);
     }else {
@@ -76,7 +76,7 @@ void PageAllocator::freePage(pgid_t pos, u32 len) {
             
         // merge
         prev->len += cur.len + next->len;
-        std::memmove(next, next + 1, end - next - 1);
+        std::memmove(next, next + 1, (end - next - 1) * sizeof(Elem));
         hdr->size--;
         hdr->bytes -= sizeof(Elem);
     }

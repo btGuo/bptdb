@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.0)
+project(bptdb)
+add_compile_options(-std=c++17)
+aux_source_directory(. SRC_LIST)
+add_executable(a.out ${SRC_LIST})

@@ -24,6 +24,8 @@ public:
     using LeafNode_t  = LeafNode<KType, VType, compare_t>;
     using InnerNode_t = InnerNode<KType, compare_t>;
     using Iter_t      = typename LeafNode_t::Iter_t;
+    using IterPtr_t   = typename LeafNode_t::IterPtr_t;
+    using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
 
     // ====================================================
 
@@ -31,8 +33,8 @@ public:
         friend class Bptree;
     public:    
         Iterator() = default;
-        KType key()    { return it.key(); }
-        VType val()    { return it.val(); }
+        KType key()    { return it->key(); }
+        VType val()    { return it->val(); }
         bool  valid()  { return _valid; }
         bool  done() { return _done; }
         void next() {
@@ -43,7 +45,7 @@ public:
                 throw "out of range";
             }
             // if we reach the last elem
-            if(it.lastElem()) {
+            if(it->lastElem()) {
                 node = node->next();
                 if(node == nullptr) {
                     _done = true;
@@ -58,7 +60,7 @@ public:
         bool _done{false};
         bool _valid{true};
         LeafNode_t *node{nullptr};
-        Iter_t it;
+        IterPtr_t it;
     };
 
     // ====================================================
@@ -95,12 +97,12 @@ public:
         it.it = node->begin();
         return it;
     }
-    Iterator upper(KType &key) {
-        return handlerIter(key, IterHandleType::upper);
-    }
-    Iterator lower(KType &key) {
-        return handlerIter(key, IterHandleType::lower);
-    }
+    //Iterator upper(KType &key) {
+    //    return handlerIter(key, IterHandleType::upper);
+    //}
+    //Iterator lower(KType &key) {
+    //    return handlerIter(key, IterHandleType::lower);
+    //}
     Iterator at(KType &key) {
         return handlerIter(key, IterHandleType::at);
     }
@@ -120,20 +122,49 @@ public:
         LeafNode_t::newOnDisk(id, fm, page_size);
     }
 
+    //====================================================================
+
+    Status get(KType key, VType &val) {
+        _root_mtx.lock_shared();
+        auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
+        return _leaf_map.get(nodeid)->get(key, val, mutex);
+    }
+
+    Status update(KType key, VType val) {
+        _root_mtx.lock_shared();
+        auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
+        return  _leaf_map.get(nodeid)->update(key, val, mutex);
+    }
+
     Status put(KType key, VType val) {
+        {
+            //try put at first.
+            _root_mtx.lock_shared();
+            auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
+            auto [success, stat] = _leaf_map.get(nodeid)->tryPut(key, val, mutex);
+            // success! only change the leafnode.
+            if(success) {
+                return stat;
+            }
+        }
+        // leafnode split.
+
         PutEntry<KType> entry;
-        std::vector<PagePtr> dirty;
-        auto stat = _put(_height, _root, key, val, 
-                         entry, dirty, _root_mtx);
+        UnWLockGuardVec_t lg_tlb(_height + 1);
+        lg_tlb.emplace_back(_root_mtx); 
+
+        _root_mtx.lock();
+
+        auto stat = _put(_height, _root, key, val, entry, lg_tlb);
         if(!stat.ok()) {
             return stat;
         }
 
         if(!entry.update) {
-            Page::writeBatch(_db->getFileManager(), dirty);
             return stat;
         }
 
+        // must be locked here.
         auto prev = _root;
         _root = _db->getPageAllocator()->allocPage(1);
         //std::cout << "root " << prev << " change to " << _root << "\n";
@@ -141,46 +172,42 @@ public:
                 _db->getFileManager(), _db->getPageSize(),
                 entry.key, prev, entry.val);
 
-        Page::writeBatch(_db->getFileManager(), dirty);
-
         _height++;
         _db->updateRoot(_name, _root, _height);
         return stat;
     }
 
-    Status get(KType key, VType &val) {
-        auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
-        //return getLeafNode(nodeid)->get(key, val, mutex);
-        return _leaf_map.get(nodeid)->get(key,val, mutex);
-    }
-
-    Status update(KType key, VType val) {
-
-        auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
-        std::vector<PagePtr> dirty;
-        auto stat = _leaf_map.get(nodeid)->update(key, val, dirty, mutex);
-        //auto stat = getLeafNode(nodeid)->update(key, val, dirty, mutex);
-        if(!stat.ok()) 
-            return stat;
-        Page::writeBatch(_db->getFileManager(), dirty);
-        return stat;
-    }
-
     Status del(KType key) {
+        {
+            //try put at first.
+            _root_mtx.lock_shared();
+            auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
+            auto [success, stat] = _leaf_map.get(nodeid)->tryDel(key, mutex);
+            // success! only change the leafnode.
+            if(success) {
+                return stat;
+            }
+        }
+
         DelEntry<KType> entry;
-        std::vector<PagePtr> dirty;
-        auto stat = _del(_height, _root, key, entry, dirty, _root_mtx);
+        UnWLockGuardVec_t lg_tlb(_height + 1);
+        lg_tlb.emplace_back(_root_mtx); 
+
+        _root_mtx.lock();
+
+        auto stat = _del(_height, _root, key, entry, lg_tlb);
         if(!stat.ok()) {
+            lg_tlb.clear();
             return stat;
         }
-        // write before we balance the tree
-        Page::writeBatch(_db->getFileManager(), dirty);
 
+        // must be locked here.
         // maybe we need to change the root
         if(_height > 1) {
             auto root = _inner_map.get(_root);
             // only one child in node
             if(root->empty()) {
+                DEBUGOUT("=====> root change");
                 auto old = _root;
                 _root = root->tochild();
                 _height--;
@@ -189,6 +216,7 @@ public:
                 _inner_map.del(old);
             }
         }
+        lg_tlb.clear();
         return stat;
     }
 
@@ -196,53 +224,50 @@ private:
 
     Status _del(u32 height, pgid_t nodeid, KType &key,
                 DelEntry<KType> &entry, 
-                std::vector<PagePtr> &dirty,
-                std::shared_mutex &par_mtx) {
+                UnWLockGuardVec_t &lg_tlb) {
 
         if(height == 1) {
             auto node = _leaf_map.get(nodeid);
-            //auto node = getLeafNode(nodeid);
-            return node->del(key, entry, dirty, par_mtx);
+            return node->del(key, entry);
         }
         DelEntry<KType> selfentry;
         auto node = _inner_map.get(nodeid);
-        auto [id, pos] = node->get(key, selfentry, par_mtx);
+        auto [id, pos] = node->get(key, selfentry, lg_tlb);
 
-        auto stat = _del(height - 1, id, key, 
-                         selfentry, dirty, node->getMutex());
+        auto stat = _del(height - 1, id, key, selfentry, lg_tlb);
         if(!stat.ok()) {
             return stat;
         }
 
         if(selfentry.update) {
-            node->update(pos, selfentry.key, dirty, par_mtx);
+            node->update(pos, selfentry.key, lg_tlb);
         }else if(selfentry.del) {
-            node->del(pos, entry, dirty, par_mtx);
+            node->del(pos, entry, lg_tlb);
+        }else {
+            DEBUGOUT("special time");
+            //lg_tlb.pop_back();
         }
+        
         return stat;
     }
 
     Status _put(u32 height, pgid_t nodeid, KType &key, VType &val, 
-                PutEntry<KType> &entry, 
-                std::vector<PagePtr> &dirty,
-                std::shared_mutex &par_mtx) {
+                PutEntry<KType> &entry, UnWLockGuardVec_t &lg_tlb) {
 
         if(height == 1) {
             auto node = _leaf_map.get(nodeid);
-            //auto node = getLeafNode(nodeid);
-            return node->put(key, val, entry, dirty, par_mtx);
+            return node->put(key, val, entry);
         }
         auto node = _inner_map.get(nodeid);
-        auto [id, pos] = node->get(key, par_mtx);
+        auto [id, pos] = node->get(key, lg_tlb);
 
         PutEntry<KType> selfentry;
-        auto stat = _put(height - 1, id, key, val, 
-                         selfentry, dirty, node->getMutex());
+        auto stat = _put(height - 1, id, key, val, selfentry, lg_tlb);
         if(!stat.ok() || !selfentry.update) 
             return stat;
 
         return node->put(pos, selfentry.key, selfentry.val, 
-                         entry, dirty, par_mtx);
+                         entry, lg_tlb);
     }
 
     std::tuple<pgid_t, std::shared_mutex &> down(

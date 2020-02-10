@@ -102,18 +102,6 @@ public:
         }
         _put(const_cast<char *>(_keys[pos].data() - sizeof(Elem)), key, val);
     }
-    //void put(std::string &key, pgid_t val) {
-    //    auto ret = std::lower_bound(
-    //        _keys.begin(), _keys.end(), key, _cmp);
-
-    //    char *it = nullptr;
-    //    if(ret == _keys.end()) {
-    //        it = _end;
-    //    }else {
-    //        it = const_cast<char *>(ret->data()) - sizeof(Elem);
-    //    }
-    //    _put(it, key, val);
-    //}
 
     // delete elem at pos.
     void delat(u32 pos) {

@@ -5,15 +5,80 @@
 #include <string>
 #include <cstdint>
 #include <string_view>
-
+#include <shared_mutex>
+#include <cstdio>
+#include <cassert>
+#include <new>
 
 namespace bptdb {
+
+#define DEBUG 1
+
+#ifdef DEBUG
+#define DEBUGOUT(...) do{ \
+    std::printf("[%s: %d] ", __FILE__, __LINE__); \
+    std::printf(__VA_ARGS__); \
+    std::printf("\n");\
+}while(0)
+#else 
+#define DEBUGOUT(...) (void(0))
+#endif
 
 using u8  = std::uint8_t;
 using u32 = std::uint32_t;
 using u16 = std::uint16_t;
 using u64 = std::uint64_t;
 using pgid_t = std::uint32_t;
+
+template <typename T>
+class UnLockGuardArray {
+public:
+    UnLockGuardArray(u32 cap) {
+        _cap = cap;
+        _arr = (T *)std::malloc(sizeof(T) * _cap);
+    }
+    ~UnLockGuardArray() {
+        clear();
+        if(_arr) std::free(_arr);
+    }
+    void emplace_back(std::shared_mutex &mtx) {
+        assert(_size < _cap);
+        new(_arr + _size++)T(mtx);
+    }
+    void pop_back() {
+        assert(_size > 0);
+        (_arr + --_size)->~T();
+    }
+    void clear() {
+        for(int i = 0; i < _size; i++) {
+            (_arr + i)->~T();
+        }
+        _size = 0;
+    }
+    u32 size() {
+        return _size;
+    }
+private:
+    T *_arr{nullptr};
+    u32 _size{0};
+    u32 _cap{0};
+};
+
+class UnReadLockGuard {
+public:
+    UnReadLockGuard(std::shared_mutex &mtx): _mtx(mtx){}
+    ~UnReadLockGuard() { _mtx.unlock_shared(); }
+private:
+    std::shared_mutex &_mtx;
+};
+
+class UnWriteLockGuard {
+public:
+    UnWriteLockGuard(std::shared_mutex &mtx): _mtx(mtx) {}
+    ~UnWriteLockGuard() { _mtx.unlock(); }
+private:
+    std::shared_mutex &_mtx;
+};
 
 namespace keyOrder {
     struct ASCE {};
@@ -23,34 +88,6 @@ namespace keyOrder {
 static inline u32 roundup(u32 size) {
     return size - size / 2;
 }
-
-namespace typeCoding {
-
-template<typename T>
-constexpr inline u8 code(T *p = nullptr) { return -1; }
-
-template<>
-constexpr inline u8 code(int *p) { return 1; }
-
-template<>
-constexpr inline u8 code(short *p) { return 2; }
-
-template<>
-constexpr inline u8 code(double *p) { return 3; }
-
-template<>
-constexpr inline u8 code(float *p) { return 4; }
-
-template<>
-constexpr inline u8 code(std::string *p) { return 5; }
-
-template<>
-constexpr inline u8 code(keyOrder::ASCE *p) { return 0; }
-
-template<>
-constexpr inline u8 code(keyOrder::DESC *p) { return 1; }
-
-}// namespace typeCoding
 
 namespace keycompare {
 
@@ -81,7 +118,6 @@ struct less<std::string> {
         return lhs < rhs;
     }
 };
-
 
 }// namespace keycompare
 

@@ -131,4 +131,8 @@ void DB::updateRoot(std::string &name, pgid_t newroot, u32 height) {
     assert(stat.ok());
 }
 
+void DB::show() {
+    _pa->show();
+}
+
 }// namespace bptdb

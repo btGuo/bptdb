@@ -41,6 +41,9 @@ public:
         bool valid() {
             return _con->valid;
         }
+        bool lastElem() {
+            return _pos + 1 == *(_con->_size);
+        }
     private:
         KType _key;
         VType _val;

@@ -182,15 +182,19 @@ public:
     class Iterator {
         friend class LeafContainer;
     public:
-        Iterator(){}
+        Iterator(Iterator &&iter) {
+            _pos = iter._pos;
+            _con = iter._con;
+            _key = std::move(iter._key);
+            _val = std::move(iter._val);
+        }
         Iterator(int pos, LeafContainer *con) {
             _pos = pos;
             _con = con;
             _key = _con->key(_pos);
             _val = _con->val(_pos);
-            _id  = ids++;
         }
-//#ifdef DEBUG
+#ifdef DEBUG
         void next() {
             _pos++;
             if(_pos == *(_con->_size)) {
@@ -199,10 +203,9 @@ public:
             _key = _con->key(_pos);
             _val = _con->val(_pos);
         }
-//#endif
+#endif
         std::string key() { return _key; }
         VType val() { return _val; }
-        u32 id() { return _id; }
         bool done() {
             return _pos == *(_con->_size);    
         }
@@ -215,9 +218,7 @@ public:
         std::string   _key;
         VType         _val;
         int           _pos{0};
-        u32           _id;
         LeafContainer *_con{nullptr};
-        static u32 ids;
     };
 
     LeafContainer() = default;
@@ -375,9 +376,6 @@ public:
     u32 size() { return *_size; }
     bool raw() { return !_data; }
 };
-
-template <typename VType, typename Comp>
-u32 LeafContainer<std::string, VType, Comp>::Iterator::ids{0};
 
 }// namespace bptdb
 #endif

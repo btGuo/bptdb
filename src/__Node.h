@@ -1,6 +1,7 @@
 #ifndef __NODE_H
 #define __NODE_H
 
+#include <vector>
 #include <type_traits>
 #include <cstring>
 #include <shared_mutex>
@@ -84,7 +85,7 @@ protected:
 
     template <typename ContainerType, typename KType>
     void split(PageHeader *hdr, PutEntry<KType> &entry, 
-               std::vector<PagePtr > &dirty, ContainerType &container) {
+               ContainerType &container) {
 
         u32 len = byte2page(hdr->bytes);
         auto pg = _db->getPageCache()->alloc(
@@ -100,13 +101,13 @@ protected:
 
         entry.val = pg->getId();
         entry.key = container.splitTo(other);
-        dirty.push_back(pg);
+        
+        pg->write(_db->getFileManager());
     }
 
     template <typename ContainerType, typename KType>
     bool borrow(PageHeader *hdr, PagePtr pg, 
             DelEntry<KType> &entry, 
-            std::vector<PagePtr> &dirty, 
             ContainerType &container,
             ContainerType &next_container) {
         
@@ -126,14 +127,13 @@ protected:
 
         entry.key = container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        dirty.push_back(next_pg);
+        pg->write(_db->getFileManager());
         return true;
     }
 
     template <typename ContainerType, typename KType>
     pgid_t merge(PageHeader *hdr, PagePtr pg, 
             DelEntry<KType> &entry, 
-            std::vector<PagePtr> &dirty, 
             ContainerType &container,
             ContainerType &next_container) {
 
@@ -182,8 +182,14 @@ protected:
     u32 byte2page(u32 bytes) {
         return (bytes + _db->getPageSize() - 1) / _db->getPageSize();
     }
+    bool safetoput(PageHeader *hdr) {
+        return hdr->size < _maxsize;
+    }
     bool ifsplit(PageHeader *hdr) {
         return hdr->size > _maxsize;
+    }
+    bool safetodel(PageHeader *hdr) {
+        return hdr->size > _maxsize / 2;
     }
     bool ifmerge(PageHeader *hdr) {
         return hdr->size < _maxsize / 2;

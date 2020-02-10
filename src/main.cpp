@@ -1,7 +1,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <vector>
-#include "FileManager.h"
 #include "bptdb.h"
 
 using namespace std;
@@ -43,19 +42,34 @@ int main(int argc, char **argv) {
         }
     }
 
+    //int size = 1024;
     auto kvs = getdata("data.txt", size);
 
-    while(size--) {
+    //for(int i = 0; i < size; i++) {
+    //    assert(bucket->put(kvs[i].first, kvs[i].second).ok());
+    //}
 
+    //sort(kvs.begin(), kvs.end(), 
+    //     [](const auto &p1, const auto &p2) {
+    //         return p1.first < p2.first;
+    //     });
+
+    //int i = 0;
+    //for(auto it = bucket->begin(); 
+    //    it.valid() && !it.done(); it.next()) {
+    //    assert(it.key() == kvs[i].first && 
+    //           it.val() == kvs[i].second);
+    //    i++;
+    //}
+
+    while(size--) {
+        //cout << size << "\n";
         if(option == 1) {
             stat = bucket->put(kvs[size].first, kvs[size].second);
             assert(stat.ok());
         }else if(option == 2) {
             stat = bucket->del(kvs[size].first);
-            if(!stat.ok()) {
-                cout << stat.getErrmsg() << endl;
-            }
-            //assert(stat.ok());
+            assert(stat.ok());
         }else if(option == 3) {
             string val;
             stat = bucket->get(kvs[size].first, val);
@@ -65,4 +79,5 @@ int main(int argc, char **argv) {
             break;
         }
     }
+    //db.show();
 }

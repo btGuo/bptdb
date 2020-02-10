@@ -1,6 +1,7 @@
 #ifndef __BPTDB_H
 #define __BPTDB_H
 
+#include <typeinfo>
 #include "Status.h"
 #include "DB.h"
 #include "Bptree.h"
@@ -38,9 +39,9 @@ static inline Status
 handlerBucket(std::string name, DB *db,
              std::shared_ptr<Bptree<KType, VType, OrderType>> &ptr, bool type) {
     BptreeMeta meta;
-    meta.keytype = typeCoding::code<KType>();
-    meta.valtype = typeCoding::code<VType>();
-    meta.cmptype = typeCoding::code<OrderType>();
+    meta.keytype = typeid(KType).hash_code();
+    meta.valtype = typeid(VType).hash_code();
+    meta.cmptype = typeid(OrderType).hash_code();
     Status stat;
     if(type) {
         stat = db->getBucket(name, meta);

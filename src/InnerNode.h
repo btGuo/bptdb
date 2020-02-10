@@ -9,15 +9,18 @@ namespace bptdb {
 template <typename KType, typename Comp>
 class InnerNode: public Node {
 public:
+    //using UnRLockGuardVec_t = std::vector<UnReadLockGuard>;
+    using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
+    using Mutex_t = std::shared_mutex;
+
     InnerNode(pgid_t id, u32 maxsize, DB *db, 
             NodeMap<InnerNode> *map): Node(id, maxsize, db){
         _map = map;
     }
 
+    // the mutex must locked by func get() at here.
     Status put(u32 pos, KType &key, pgid_t &val, 
-            PutEntry<KType> &entry, 
-            std::vector<PagePtr> &dirty, 
-            std::shared_mutex &par_mtx) {
+            PutEntry<KType> &entry, UnWLockGuardVec_t &lg_tlb) {
 
         auto [hdr, pg] = handlePage(_container);
         auto extbytes = _container.elemSize(key, val);
@@ -27,51 +30,50 @@ public:
             containerReset(hdr, _container);
         }
         _container.putat(pos, key, val);
-        //std::cout << "hdr->size " << hdr->size << "\n";
-        //std::cout << hdr->pghdr.bytes << "\n";
 
         if(ifsplit(hdr)) {
-            std::cout << "=====> innernode split \n";
-            split(hdr, entry, dirty, _container);
+            DEBUGOUT("===> innernode split");
+            split(hdr, entry, _container);
             entry.update = true;
         }
-        dirty.push_back(pg);
+        pg->write(_db->getFileManager());
+        // unlock self.
+        lg_tlb.pop_back();
         return Status();
     }
 
+    // the mutex must locked by func get() at here.
     void del(u32 pos, DelEntry<KType> &entry,
-            std::vector<PagePtr> &dirty,
-            std::shared_mutex &par_mtx) {
+            UnWLockGuardVec_t &lg_tlb) {
 
         auto [hdr, pg] = handlePage(_container);
         // delete key at pos
         _container.delat(pos);
 
+        auto &next_container = _map->get(hdr->next)->_container;
         // if legal or we are the last child of parent
         // return once.
         if(!ifmerge(hdr) || entry.last || !hdr->next) {
-            dirty.push_back(pg);
-            return;
+            goto done;
         }
 
-        auto &next_container = _map->get(hdr->next)->_container;
-
-        std::cout << "=====> innernode borrow\n";
-        if(borrow(hdr, pg, entry, dirty, _container, next_container)) {
-            dirty.push_back(pg);
-            return;
+        DEBUGOUT("===> innernode borrow");
+        if(borrow(hdr, pg, entry, _container, next_container)) {
+            goto done;
         }
 
-        std::cout << "=====> innernode merge\n";
-        _map->del(merge(hdr, pg, entry, dirty, _container, next_container));
-        dirty.push_back(pg);
+        DEBUGOUT("===> innernode merge");
+        _map->del(merge(hdr, pg, entry, _container, next_container));
+
+done:
+        pg->write(_db->getFileManager());
+        lg_tlb.pop_back();
     }
 
+    // the mutex must locked by func get() at here.
     void update(u32 pos, KType &newkey, 
-            std::vector<PagePtr> &dirty,
-            std::shared_mutex &par_mtx) {
+            UnWLockGuardVec_t &lg_tlb) {
 
-        //std::cout << "update " << newkey << "\n";
         auto [hdr, pg] = handlePage(_container);
         auto extbytes = _container.elemSize(newkey, 0);
         if(pg->overFlow(extbytes)) {
@@ -79,23 +81,55 @@ public:
             containerReset(hdr, _container);
         }
         _container.updateKeyat(pos, newkey);
-        dirty.push_back(pg);
+
+        pg->write(_db->getFileManager());
+        lg_tlb.pop_back();
     }
 
-    std::tuple<pgid_t, u32> get(
-        KType &key, std::shared_mutex &par_mtx) {
+    // for put
+    std::tuple<pgid_t, u32> 
+    get(KType &key, UnWLockGuardVec_t &lg_tlb) {
+
+        _shmtx.lock();
+        auto [hdr, pg] = handlePage(_container);
+        if(safetoput(hdr)) {
+            lg_tlb.clear();
+        }
+        lg_tlb.emplace_back(_shmtx);
 
         handlePage(_container);
         return _container.get(key);
     }
 
-    std::tuple<pgid_t, u32> get(
-        KType &key, DelEntry<KType> &entry, 
-        std::shared_mutex &par_mtx) {
+    // for del
+    std::tuple<pgid_t, u32> 
+    get(KType &key, DelEntry<KType> &entry, 
+        UnWLockGuardVec_t &lg_tlb) {
+
+        _shmtx.lock();
+        auto [hdr, pg] = handlePage(_container);
+        if(safetodel(hdr)) {
+            lg_tlb.clear();
+        }
+        lg_tlb.emplace_back(_shmtx);
 
         handlePage(_container);
         return _container.get(key, entry);
     }
+
+    // for search
+    std::tuple<pgid_t, u32> 
+    get(KType &key, Mutex_t &par_mtx) {
+
+        //lock self and release parent.
+        _shmtx.lock_shared();
+        par_mtx.unlock_shared();
+
+        handlePage(_container);
+        return _container.get(key);
+    }
+
+    //==================================================
 
     static void newOnDisk(
         pgid_t id, FileManager *fm, u32 page_size, 
@@ -113,19 +147,20 @@ public:
         pg.write(fm);
     }
 
-    InnerNode *next() {
-        auto [hdr, pg] = handlePage(_container);
-        if(hdr->next == 0) {
-            return nullptr;
-        }
-        return _map->get(hdr->next);
-    }
+    //InnerNode *next() {
+    //    auto [hdr, pg] = handlePage(_container);
+    //    if(hdr->next == 0) {
+    //        return nullptr;
+    //    }
+    //    return _map->get(hdr->next);
+    //}
 
     bool empty() {
         auto [hdr, pg] = handlePage(_container);
         return hdr->size == 0;
     }
 
+    // XXX
     // return the only child in node
     pgid_t tochild() {
         //std::cout << "tochild\n";

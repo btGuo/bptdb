@@ -29,9 +29,9 @@ struct BptreeMeta {
     pgid_t first;
     u32 height;
     u32 order;
-    u8  keytype;
-    u8  valtype;
-    u8  cmptype;
+    u64 keytype;
+    u64 valtype;
+    u64 cmptype;
 };
 
 class DB {
@@ -50,6 +50,7 @@ public:
     Status getBucket(std::string name, BptreeMeta &meta);
 
     void updateRoot(std::string &name, pgid_t newroot, u32 height);
+    void show();
 
     FileManager *getFileManager() {
         return _fm.get();

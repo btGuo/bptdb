@@ -182,30 +182,16 @@ public:
     class Iterator {
         friend class LeafContainer;
     public:
-        Iterator(Iterator &&iter) {
-            _pos = iter._pos;
-            _con = iter._con;
-            _key = std::move(iter._key);
-            _val = std::move(iter._val);
-        }
+        Iterator() = default;
         Iterator(int pos, LeafContainer *con) {
             _pos = pos;
             _con = con;
-            _key = _con->key(_pos);
-            _val = _con->val(_pos);
         }
-#ifdef DEBUG
         void next() {
             _pos++;
-            if(_pos == *(_con->_size)) {
-                return;
-            }
-            _key = _con->key(_pos);
-            _val = _con->val(_pos);
         }
-#endif
-        std::string key() { return _key; }
-        VType val() { return _val; }
+        std::string key() { return _con->key(_pos); }
+        VType val() { return _con->val(_pos); }
         bool done() {
             return _pos == *(_con->_size);    
         }
@@ -213,10 +199,6 @@ public:
             return _pos + 1 == *(_con->_size);
         }
     private:
-        // different from general iterator, we save key and val here,
-        // because the memory in container may be modified by other thread
-        std::string   _key;
-        VType         _val;
         int           _pos{0};
         LeafContainer *_con{nullptr};
     };
@@ -239,16 +221,6 @@ public:
     Iterator begin() {
         return Iterator(0, this);
     }
-    Iterator upper(std::string &key) {
-        auto it = std::upper_bound(
-            _keys.begin(), _keys.end(), key, _cmp);
-        return Iterator(it - _keys.begin(), this);
-    }
-    Iterator lower(std::string &key) {
-        auto it = std::lower_bound(
-            _keys.begin(), _keys.end(), key, _cmp);
-        return Iterator(it - _keys.begin(), this);
-    }
     Iterator at(std::string &key) {
         auto it = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
@@ -256,16 +228,6 @@ public:
             return Iterator();
         }
         return Iterator(it - _keys.begin(), this);
-    }
-    void updateIter(Iterator &iter, IterMoveType type) {
-        // 越界检查 ??? 
-        if(type == IterMoveType::Forward)
-            iter._pos++;
-        else 
-            iter._pos--;
-        assert(iter._pos < *_size);
-        iter._key = key(iter._pos);
-        iter._val = val(iter._pos);
     }
     //================================================
 

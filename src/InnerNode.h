@@ -129,6 +129,14 @@ done:
         return _container.get(key);
     }
 
+    // without lock
+    std::tuple<pgid_t, u32> 
+    get(KType &key) {
+
+        handlePage(_container);
+        return _container.get(key);
+    }
+
     //==================================================
 
     static void newOnDisk(

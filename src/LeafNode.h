@@ -17,7 +17,7 @@ class LeafNode: public Node {
 public:
     using ContainerType = LeafContainer<KType, VType, Comp>;
     using Iter_t = typename ContainerType::Iterator;
-    using IterPtr_t = std::shared_ptr<Iter_t>;
+    //using IterPtr_t = std::shared_ptr<Iter_t>;
     using Mutex_t = std::shared_mutex;
 
     LeafNode(pgid_t id, u32 maxsize, DB *db, 
@@ -39,7 +39,6 @@ public:
         if(!safetoput(hdr)) {
             return std::make_tuple(false, Status());
         }
-        _iters.clear();
 
         auto extbytes = _container.elemSize(key, val);
         // there enought space
@@ -58,8 +57,6 @@ public:
         auto [hdr, pg] = handlePage(_container);
         // func tryPut() have do this.
         assert(!_container.find(key));
-
-        _iters.clear();
 
         auto extbytes = _container.elemSize(key, val);
         // there enought space
@@ -93,7 +90,7 @@ public:
         if(!safetodel(hdr)) {
             return std::make_tuple(false, Status());
         }
-        _iters.clear();
+
         _container.del(key);
         pg->write(_db->getFileManager());
         return std::make_tuple(true, Status());
@@ -107,7 +104,6 @@ public:
         // the key is not exist
         assert(_container.find(key));
 
-        _iters.clear();
         _container.del(key);
 
         assert(ifmerge(hdr));
@@ -157,8 +153,6 @@ done:
             return Status(error::keyNotFind);
         }
 
-        // if we should update iter here ???
-
         auto extbytes = _container.elemSize(key, val);
 
         if(pg->overFlow(extbytes)) {
@@ -170,50 +164,19 @@ done:
 
         return Status();
     }
+
+    // !!!iteration without lock
     // =====================================================
 
-    IterPtr_t begin() {
-        // write lock here because we change the _iters.
-        //std::lock_guard lg(_shmtx);
+    std::tuple<Iter_t, PagePtr> begin() {
+        auto [hdr, pg] = handlePage(_container);
+        return std::make_tuple(_container.begin(), pg);
+    }
+    std::tuple<Iter_t, PagePtr> at(KType &key) {
+        auto [hdr, pg] = handlePage(_container);
+        return std::make_tuple(_container.at(key), pg);
+    }
 
-        handlePage(_container);
-        auto it =  std::make_shared<Iter_t>(_container.begin());
-        _iters.push_back(it);
-        return it;
-    }
-    //// XXX
-    //IterPtr_t upper(KType &key, Mutex_t &par_mtx) {
-    //    handlePage(_container);
-    //    auto it =  std::make_shared<Iter_t>(_container.upper());
-    //    _iters.push_back(it);
-    //    return it;
-    //}
-    //// XXX
-    //IterPtr_t lower(KType &key, Mutex_t &par_mtx) {
-    //    handlePage(_container);
-    //    auto it =  std::make_shared<Iter_t>(_container.lower());
-    //    _iters.push_back(it);
-    //    return it;
-    //}
-    IterPtr_t at(KType &key, Mutex_t &par_mtx) {
-        // write lock here because we change the _iters.
-        //std::lock_guard lg(_shmtx);
-        //par_mtx.unlock_shared();
-
-        handlePage(_container);
-        auto it =  std::make_shared<Iter_t>(_container.at(key));
-        _iters.push_back(it);
-        return it;
-    }
-    bool updateIter(IterPtr_t iter, IterMoveType type) {
-        //std::shared_lock lg(_shmtx);
-        handlePage(_container);
-        if(iter.use_count() == 1) {
-            return false;
-        }
-        _container.updateIter(*iter, type);    
-        return true;
-    }
     // ================================================= 
     static void newOnDisk(pgid_t id, FileManager *fm, 
                                    u32 page_size) {
@@ -222,7 +185,7 @@ done:
         PageHeader::init(hdr, 1, 0);
         pg.write(fm);
     }
-    //XXX
+    // !!!without lock
     LeafNode *next() {
         auto [hdr, pg] = handlePage(_container);
         if(hdr->next == 0) {
@@ -233,8 +196,6 @@ done:
 
 private:
     ContainerType        _container;
-    //TODO change to thread safe
-    std::list<IterPtr_t> _iters;
     NodeMap<LeafNode>    *_map;
 };
 

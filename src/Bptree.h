@@ -24,7 +24,6 @@ public:
     using LeafNode_t  = LeafNode<KType, VType, compare_t>;
     using InnerNode_t = InnerNode<KType, compare_t>;
     using Iter_t      = typename LeafNode_t::Iter_t;
-    using IterPtr_t   = typename LeafNode_t::IterPtr_t;
     using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
 
     // ====================================================
@@ -35,76 +34,45 @@ public:
         Iterator() = default;
         KType key()    { return it->key(); }
         VType val()    { return it->val(); }
-        bool  valid()  { return _valid; }
         bool  done() { return _done; }
         void next() {
-            if(!_valid) {
-                throw "unvalid iter";
-            }
             if(_done) {
                 throw "out of range";
             }
+            it.next();
             // if we reach the last elem
-            if(it->lastElem()) {
-                node = node->next();
-                if(node == nullptr) {
+            if(it.done()) {
+                if(!(node = node->next())) {
                     _done = true;
                     return;
                 }
-                it = node->begin();
-                return;
+                std::tie(it, pg) = node->begin();
             }
-            _valid = node->updateIter(it, IterMoveType::Forward);
         }
     private:
         bool _done{false};
-        bool _valid{true};
         LeafNode_t *node{nullptr};
-        IterPtr_t it;
+        Iter_t it;
+        std::shared_ptr<Page> pg;
     };
 
     // ====================================================
 
-    enum class IterHandleType {
-        upper, lower, at,
-    };
-
-    Iterator handlerIter(KType &key, IterHandleType type) {
-        auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
-        auto node = getLeafNode(nodeid);
-        Iterator it;
-        it.node = node;
-
-        if(type == IterHandleType::upper) {
-            it.it = node->upper(key, mutex);
-        }
-        else if(type == IterHandleType::lower) {
-            it.it = node->lower(key, mutex);
-        }
-        else if(type == IterHandleType::at) {
-            it.it = node->at(key, mutex);
-        }
-        else {
-            // should not be here
-            assert(0);
-        }
-        return it;
-    }
     Iterator begin() {
         auto node = _leaf_map.get(_first);
         Iterator it;
         it.node = node;
-        it.it = node->begin();
+        std::tie(it.it, it.pg) = node->begin();
         return it;
     }
-    //Iterator upper(KType &key) {
-    //    return handlerIter(key, IterHandleType::upper);
-    //}
-    //Iterator lower(KType &key) {
-    //    return handlerIter(key, IterHandleType::lower);
-    //}
+
     Iterator at(KType &key) {
-        return handlerIter(key, IterHandleType::at);
+        auto nodeid = down(_height, _root, key);
+        auto node = _leaf_map.get(nodeid);
+        Iterator it;
+        it.node = node;
+        std::tie(it.it, it.pg) = node->at(key, mutex);
+        return it;
     }
     // ====================================================
 
@@ -283,6 +251,22 @@ private:
             return std::forward_as_tuple(id, node->getMutex());
         }
         return down(height - 1, id, key, node->getMutex()); 
+    }
+
+    pgid_t down(u32 height, pgid_t nodeid, KType &key) {
+        if(height == 1) {
+            return nodeid;
+        }
+        auto node = _inner_map.get(nodeid);
+        auto [id, pos] = node->get(key);
+        if(height == 2) {
+            return id;
+        }
+        return down(height - 1, id, key); 
+    }
+
+    std::shared_mutex &mutex() {
+        return _root_mtx;
     }
 
     u32           _order{0};

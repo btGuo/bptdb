@@ -79,5 +79,8 @@ int main(int argc, char **argv) {
             break;
         }
     }
+
+    for(auto it = bucket->begin(); !it.done(); it.next()) {
+    }
     //db.show();
 }

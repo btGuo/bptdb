@@ -24,8 +24,7 @@ public:
     PagePtr alloc(Args && ... args) {
         auto pg = std::make_shared<Page>(std::forward<Args>(args)...);
         _page_count++;
-        std::lock_guard<std::mutex> clock(_cache_mtx);
-        std::lock_guard<std::mutex> llock(_lru_mtx);
+        std::lock_guard lg(_mtx);
         if(_page_count > _max_page) {
 
             auto pg = _lru.pop_back();    
@@ -41,8 +40,7 @@ private:
     u32 _max_page{0};
     std::atomic<u32> _page_count{0};
     std::unordered_map<pgid_t, PagePtr> _cache;
-    std::mutex _cache_mtx;
-    std::mutex _lru_mtx;
+    std::mutex _mtx;
     List<Page> _lru; // 侵入式链表，并不拥有Page所有权
 };
 

@@ -9,31 +9,25 @@
 #include "Status.h"
 #include "LeafNode.h"
 #include "InnerNode.h"
+#include "LockHelper.h"
 #include "DB.h"
+#include "IteratorBase.h"
 
 namespace bptdb {
 
-template <typename KType, typename VType, typename OrderType>
 class Bptree {
 public:
-    using compare_t = std::conditional_t<
-          std::is_same_v<OrderType, keyOrder::ASCE>, 
-          keycompare::less<KType>, 
-          keycompare::greater<KType> >;
-
-    using LeafNode_t  = LeafNode<KType, VType, compare_t>;
-    using InnerNode_t = InnerNode<KType, compare_t>;
-    using Iter_t      = typename LeafNode_t::Iter_t;
+    using Iter_t      = LeafNode::Iter_t;
     using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
 
     // ====================================================
 
-    class Iterator {
+    class Iterator: public IteratorBase {
         friend class Bptree;
     public:    
         Iterator() = default;
-        KType key()    { return it->key(); }
-        VType val()    { return it->val(); }
+        std::string_view key()    { return it.key(); }
+        std::string_view val()    { return it.val(); }
         bool  done() { return _done; }
         void next() {
             if(_done) {
@@ -51,60 +45,61 @@ public:
         }
     private:
         bool _done{false};
-        LeafNode_t *node{nullptr};
+        LeafNode *node{nullptr};
         Iter_t it;
-        std::shared_ptr<Page> pg;
+        PagePtr pg;
     };
 
     // ====================================================
 
-    Iterator begin() {
+    std::shared_ptr<IteratorBase> begin() {
         auto node = _leaf_map.get(_first);
-        Iterator it;
-        it.node = node;
-        std::tie(it.it, it.pg) = node->begin();
+        auto it = std::make_shared<Iterator>();
+        it->node = node;
+        std::tie(it->it, it->pg) = node->begin();
         return it;
     }
 
-    Iterator at(KType &key) {
+    std::shared_ptr<IteratorBase> at(std::string &key) {
         auto nodeid = down(_height, _root, key);
         auto node = _leaf_map.get(nodeid);
-        Iterator it;
-        it.node = node;
-        std::tie(it.it, it.pg) = node->at(key, mutex);
+        auto it = std::make_shared<Iterator>();
+        it->node = node;
+        std::tie(it->it, it->pg) = node->at(key);
         return it;
     }
     // ====================================================
 
-    Bptree(std::string name, BptreeMeta meta, DB *db):
-    _leaf_map(meta.order, db), _inner_map(meta.order, db){
+    Bptree(std::string name, BptreeMeta meta, DB *db, comparator_t cmp):
+    _leaf_map(meta.order, db, cmp), _inner_map(meta.order, db, cmp){
         _name   = name;
         _order  = meta.order;
         _height = meta.height;
         _root   = meta.root;
         _first  = meta.first;
         _db     = db;
+        _cmp    = cmp;
     }
 
     static void newOnDisk(pgid_t id, FileManager *fm, u32 page_size) {
-        LeafNode_t::newOnDisk(id, fm, page_size);
+        LeafNode::newOnDisk(id, fm, page_size);
     }
 
     //====================================================================
 
-    Status get(KType key, VType &val) {
+    Status get(std::string key, std::string &val) {
         _root_mtx.lock_shared();
         auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
         return _leaf_map.get(nodeid)->get(key, val, mutex);
     }
 
-    Status update(KType key, VType val) {
+    Status update(std::string key, std::string val) {
         _root_mtx.lock_shared();
         auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
         return  _leaf_map.get(nodeid)->update(key, val, mutex);
     }
 
-    Status put(KType key, VType val) {
+    Status put(std::string key, std::string val) {
         {
             //try put at first.
             _root_mtx.lock_shared();
@@ -117,7 +112,7 @@ public:
         }
         // leafnode split.
 
-        PutEntry<KType> entry;
+        PutEntry entry;
         UnWLockGuardVec_t lg_tlb(_height + 1);
         lg_tlb.emplace_back(_root_mtx); 
 
@@ -136,7 +131,7 @@ public:
         auto prev = _root;
         _root = _db->getPageAllocator()->allocPage(1);
         //std::cout << "root " << prev << " change to " << _root << "\n";
-        InnerNode_t::newOnDisk(_root,
+        InnerNode::newOnDisk(_root,
                 _db->getFileManager(), _db->getPageSize(),
                 entry.key, prev, entry.val);
 
@@ -145,7 +140,7 @@ public:
         return stat;
     }
 
-    Status del(KType key) {
+    Status del(std::string key) {
         {
             //try put at first.
             _root_mtx.lock_shared();
@@ -157,7 +152,7 @@ public:
             }
         }
 
-        DelEntry<KType> entry;
+        DelEntry entry;
         UnWLockGuardVec_t lg_tlb(_height + 1);
         lg_tlb.emplace_back(_root_mtx); 
 
@@ -190,15 +185,15 @@ public:
 
 private:
 
-    Status _del(u32 height, pgid_t nodeid, KType &key,
-                DelEntry<KType> &entry, 
+    Status _del(u32 height, pgid_t nodeid, std::string &key,
+                DelEntry &entry, 
                 UnWLockGuardVec_t &lg_tlb) {
 
         if(height == 1) {
             auto node = _leaf_map.get(nodeid);
             return node->del(key, entry);
         }
-        DelEntry<KType> selfentry;
+        DelEntry selfentry;
         auto node = _inner_map.get(nodeid);
         auto [id, pos] = node->get(key, selfentry, lg_tlb);
 
@@ -219,8 +214,8 @@ private:
         return stat;
     }
 
-    Status _put(u32 height, pgid_t nodeid, KType &key, VType &val, 
-                PutEntry<KType> &entry, UnWLockGuardVec_t &lg_tlb) {
+    Status _put(u32 height, pgid_t nodeid, std::string &key, std::string &val, 
+                PutEntry &entry, UnWLockGuardVec_t &lg_tlb) {
 
         if(height == 1) {
             auto node = _leaf_map.get(nodeid);
@@ -229,7 +224,7 @@ private:
         auto node = _inner_map.get(nodeid);
         auto [id, pos] = node->get(key, lg_tlb);
 
-        PutEntry<KType> selfentry;
+        PutEntry selfentry;
         auto stat = _put(height - 1, id, key, val, selfentry, lg_tlb);
         if(!stat.ok() || !selfentry.update) 
             return stat;
@@ -239,7 +234,7 @@ private:
     }
 
     std::tuple<pgid_t, std::shared_mutex &> down(
-        u32 height, pgid_t nodeid , KType &key, 
+        u32 height, pgid_t nodeid , std::string &key, 
         std::shared_mutex &par_mtx) {
 
         if(height == 1) {
@@ -253,7 +248,7 @@ private:
         return down(height - 1, id, key, node->getMutex()); 
     }
 
-    pgid_t down(u32 height, pgid_t nodeid, KType &key) {
+    pgid_t down(u32 height, pgid_t nodeid, std::string &key) {
         if(height == 1) {
             return nodeid;
         }
@@ -274,10 +269,11 @@ private:
     pgid_t        _root{0};
     pgid_t        _first{0};
     std::string   _name;
+    comparator_t  _cmp;
     DB            *_db{nullptr};
     std::shared_mutex  _root_mtx;
-    NodeMap <LeafNode_t>  _leaf_map;
-    NodeMap <InnerNode_t> _inner_map;
+    NodeMap <LeafNode>  _leaf_map;
+    NodeMap <InnerNode> _inner_map;
 };
 
 }// namespace bptdb

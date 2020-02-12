@@ -29,10 +29,10 @@ private:
     bool adjacent(Elem *p1, Elem *p2) {
         return p1->pos + p1->len == p2->pos;
     }
-    u32         _page_size{0};
-    pgid_t      _root{0};
-    FileManager *_fm{nullptr};
-    Elem        _tmp;
+    u32                   _page_size{0};
+    pgid_t                _root{0};
+    FileManager           *_fm{nullptr};
+    Elem                  _tmp;
     std::mutex  _mtx;
     std::unique_ptr<Page> _pg{nullptr};
 };

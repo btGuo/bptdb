@@ -1,12 +1,12 @@
 #ifndef __INNER_NODE_H
 #define __INNER_NODE_H
 
-#include "__Node.h"
+#include "Node.h"
 #include "InnerContainer.h"
+#include "LockHelper.h"
 
 namespace bptdb {
 
-template <typename KType, typename Comp>
 class InnerNode: public Node {
 public:
     //using UnRLockGuardVec_t = std::vector<UnReadLockGuard>;
@@ -14,27 +14,118 @@ public:
     using Mutex_t = std::shared_mutex;
 
     InnerNode(pgid_t id, u32 maxsize, DB *db, 
-            NodeMap<InnerNode> *map): Node(id, maxsize, db){
-        _map = map;
+            NodeMap<InnerNode> *map, comparator_t cmp): 
+        Node(id, maxsize, db), _container(cmp), _map(map){}
+
+    // ==================================================================
+
+    static void containerReset(PageHeader *hdr, InnerContainer &con) {
+        con.reset(&hdr->bytes, &hdr->size, (char *)(hdr + 1));
     }
 
-    // the mutex must locked by func get() at here.
-    Status put(u32 pos, KType &key, pgid_t &val, 
-            PutEntry<KType> &entry, UnWLockGuardVec_t &lg_tlb) {
-
-        auto [hdr, pg] = handlePage(_container);
-        auto extbytes = _container.elemSize(key, val);
-        // there enought space
-        if(pg->overFlow(extbytes)) {
-            hdr = (PageHeader *)pg->extend(_db->getPageAllocator(), extbytes);
+    std::tuple<PageHeader *, PagePtr> 
+    handlePage() {
+        PageHeader *hdr = nullptr;
+        PagePtr pg = _db->getPageCache()->get(_id);
+        if(!pg) {
+            pg = _db->getPageCache()->alloc(_id, _db->getPageSize());
+            //_db->getPageCache()->put(pg);
+            hdr = (PageHeader *)pg->read(_db->getFileManager());
             containerReset(hdr, _container);
+        }else {
+            hdr = (PageHeader *)pg->data();
+            if(_container.raw()) {
+                containerReset(hdr, _container);
+            }
         }
+        return std::make_tuple(hdr, pg);
+    }
+
+    PageHeader *handleOverFlow(PagePtr pg, u32 extbytes) {
+        if(pg->overFlow(extbytes)) {
+            pg->extend(_db->getPageAllocator(), extbytes);
+            containerReset((PageHeader*)pg->data(), _container);
+        }
+        return (PageHeader *)pg->data();
+    }
+
+    void split(PageHeader *hdr, PutEntry &entry) {
+
+        u32 len = byte2page(hdr->bytes);
+        auto next_pg = _db->getPageCache()->alloc(
+            _db->getPageAllocator()->allocPage(len),
+            _db->getPageSize(), len);
+        auto next_hdr = (PageHeader *)next_pg->data();
+
+        PageHeader::init(next_hdr, len, hdr->next); 
+        hdr->next = next_pg->getId();
+
+        InnerContainer next_container(_container);
+        containerReset(next_hdr, next_container);
+
+        entry.val = next_pg->getId();
+        entry.key = _container.splitTo(next_container);
+        entry.update = true;
+        
+        next_pg->write(_db->getFileManager());
+    }
+
+    bool borrow(DelEntry &entry) {
+
+        auto [hdr, pg] = handlePage();
+        auto next = _map->get(hdr->next);
+        auto [next_hdr, next_pg] = next->handlePage();
+        auto &next_container = next->_container;
+
+        if(!hasmore(next_hdr)) {
+            return false;
+        }
+
+        hdr = handleOverFlow(pg, _container.elemSize(
+                next_container.key(0), next_container.val(0)));
+
+        entry.key = _container.borrowFrom(next_container, entry.delim);
+        entry.update = true;
+        next_pg->write(_db->getFileManager());
+        return true;
+    }
+
+    void merge(DelEntry &entry) {
+
+        auto [hdr, pg] = handlePage();
+        auto next = _map->get(hdr->next);
+        auto [next_hdr, next_pg] = next->handlePage();
+        auto &next_container = next->_container;
+
+        hdr = handleOverFlow(pg, next_hdr->bytes);
+
+        _container.mergeFrom(next_container, entry.delim);
+        entry.del = true;
+
+        auto ret = hdr->next;
+        // set next
+        hdr->next = next_hdr->next;
+        // 1. free page buffer on memory and page id on disk
+        next_pg->free(_db->getPageAllocator());
+        // 2. del page at cache
+        _db->getPageCache()->del(ret);
+        // 3. del node on map
+        _map->del(ret);
+    }
+
+    // ==================================================================
+
+    // the mutex must locked by func get() at here.
+    Status put(u32 pos, std::string &key, pgid_t &val, 
+            PutEntry &entry, UnWLockGuardVec_t &lg_tlb) {
+
+        auto [hdr, pg] = handlePage();
+        hdr = handleOverFlow(pg, _container.elemSize(key, val));
         _container.putat(pos, key, val);
 
         if(ifsplit(hdr)) {
             DEBUGOUT("===> innernode split");
-            split(hdr, entry, _container);
-            entry.update = true;
+            split(hdr, entry);
         }
         pg->write(_db->getFileManager());
         // unlock self.
@@ -43,14 +134,12 @@ public:
     }
 
     // the mutex must locked by func get() at here.
-    void del(u32 pos, DelEntry<KType> &entry,
+    void del(u32 pos, DelEntry &entry,
             UnWLockGuardVec_t &lg_tlb) {
 
-        auto [hdr, pg] = handlePage(_container);
-        // delete key at pos
+        auto [hdr, pg] = handlePage();
         _container.delat(pos);
 
-        auto &next_container = _map->get(hdr->next)->_container;
         // if legal or we are the last child of parent
         // return once.
         if(!ifmerge(hdr) || entry.last || !hdr->next) {
@@ -58,28 +147,23 @@ public:
         }
 
         DEBUGOUT("===> innernode borrow");
-        if(borrow(hdr, pg, entry, _container, next_container)) {
+        if(borrow(entry)) {
             goto done;
         }
 
         DEBUGOUT("===> innernode merge");
-        _map->del(merge(hdr, pg, entry, _container, next_container));
-
+        merge(entry);
 done:
         pg->write(_db->getFileManager());
         lg_tlb.pop_back();
     }
 
     // the mutex must locked by func get() at here.
-    void update(u32 pos, KType &newkey, 
+    void update(u32 pos, std::string &newkey, 
             UnWLockGuardVec_t &lg_tlb) {
 
-        auto [hdr, pg] = handlePage(_container);
-        auto extbytes = _container.elemSize(newkey, 0);
-        if(pg->overFlow(extbytes)) {
-            hdr = (PageHeader *)pg->extend(_db->getPageAllocator(), extbytes);
-            containerReset(hdr, _container);
-        }
+        auto [hdr, pg] = handlePage();
+        hdr = handleOverFlow(pg, _container.elemSize(newkey, 0));
         _container.updateKeyat(pos, newkey);
 
         pg->write(_db->getFileManager());
@@ -88,52 +172,52 @@ done:
 
     // for put
     std::tuple<pgid_t, u32> 
-    get(KType &key, UnWLockGuardVec_t &lg_tlb) {
+    get(std::string &key, UnWLockGuardVec_t &lg_tlb) {
 
         _shmtx.lock();
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         if(safetoput(hdr)) {
             lg_tlb.clear();
         }
         lg_tlb.emplace_back(_shmtx);
 
-        handlePage(_container);
+        handlePage();
         return _container.get(key);
     }
 
     // for del
     std::tuple<pgid_t, u32> 
-    get(KType &key, DelEntry<KType> &entry, 
+    get(std::string &key, DelEntry &entry, 
         UnWLockGuardVec_t &lg_tlb) {
 
         _shmtx.lock();
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         if(safetodel(hdr)) {
             lg_tlb.clear();
         }
         lg_tlb.emplace_back(_shmtx);
 
-        handlePage(_container);
+        handlePage();
         return _container.get(key, entry);
     }
 
     // for search
     std::tuple<pgid_t, u32> 
-    get(KType &key, Mutex_t &par_mtx) {
+    get(std::string &key, Mutex_t &par_mtx) {
 
         //lock self and release parent.
         _shmtx.lock_shared();
         par_mtx.unlock_shared();
 
-        handlePage(_container);
+        handlePage();
         return _container.get(key);
     }
 
     // without lock
     std::tuple<pgid_t, u32> 
-    get(KType &key) {
+    get(std::string &key) {
 
-        handlePage(_container);
+        handlePage();
         return _container.get(key);
     }
 
@@ -141,38 +225,29 @@ done:
 
     static void newOnDisk(
         pgid_t id, FileManager *fm, u32 page_size, 
-        KType &key, pgid_t child1, pgid_t child2) {
+        std::string &key, pgid_t child1, pgid_t child2) {
 
         Page pg(id, page_size, 1);
         auto hdr = (PageHeader *)pg.data();
         PageHeader::init(hdr, 1, 0);
 
         // 初始化容器
-        ContainerType con;
+        InnerContainer con;
         containerReset(hdr, con);
         con.init(key, child1, child2);
 
         pg.write(fm);
     }
 
-    //InnerNode *next() {
-    //    auto [hdr, pg] = handlePage(_container);
-    //    if(hdr->next == 0) {
-    //        return nullptr;
-    //    }
-    //    return _map->get(hdr->next);
-    //}
-
     bool empty() {
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         return hdr->size == 0;
     }
 
-    // XXX
     // return the only child in node
     pgid_t tochild() {
         //std::cout << "tochild\n";
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         assert(hdr->next == 0);
         auto ret =  _container.head();
         // free self page
@@ -181,8 +256,7 @@ done:
         return ret;
     }
 private:
-    using ContainerType = InnerContainer<KType, Comp>;
-    ContainerType _container;
+    InnerContainer _container;
     NodeMap<InnerNode> *_map;
 };
 

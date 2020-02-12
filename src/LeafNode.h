@@ -2,35 +2,127 @@
 #define __LEAF_NODE_H
 
 #include <memory>
-#include <list>
-#include "__Node.h"
+#include "Node.h"
 #include "LeafContainer.h"
 
-// maintain other._container
+// maintain next_container._container
 
 namespace bptdb {
 
-enum class IterMoveType;
-
-template <typename KType, typename VType, typename Comp>
 class LeafNode: public Node {
 public:
-    using ContainerType = LeafContainer<KType, VType, Comp>;
-    using Iter_t = typename ContainerType::Iterator;
+    using Iter_t = LeafContainer::Iterator;
     //using IterPtr_t = std::shared_ptr<Iter_t>;
     using Mutex_t = std::shared_mutex;
 
     LeafNode(pgid_t id, u32 maxsize, DB *db, 
-             NodeMap<LeafNode> *map): Node(id, maxsize, db) {
-        _map = map;
+             NodeMap<LeafNode> *map, comparator_t cmp): 
+        Node(id, maxsize, db), _container(cmp), _map(map) {}
+
+    // ==================================================================
+
+    void containerReset(PageHeader *hdr, LeafContainer &con) {
+        con.reset(&hdr->bytes, &hdr->size, (char *)(hdr + 1));
     }
 
+    std::tuple<PageHeader *, PagePtr> 
+    handlePage() {
+        PageHeader *hdr = nullptr;
+        PagePtr pg = _db->getPageCache()->get(_id);
+        if(!pg) {
+            pg = _db->getPageCache()->alloc(_id, _db->getPageSize());
+            //_db->getPageCache()->put(pg);
+            hdr = (PageHeader *)pg->read(_db->getFileManager());
+            containerReset(hdr, _container);
+        }else {
+            hdr = (PageHeader *)pg->data();
+            if(_container.raw()) {
+                containerReset(hdr, _container);
+            }
+        }
+        return std::make_tuple(hdr, pg);
+    }
+
+    PageHeader *handleOverFlow(PagePtr pg, u32 extbytes) {
+        if(pg->overFlow(extbytes)) {
+            pg->extend(_db->getPageAllocator(), extbytes);
+            containerReset((PageHeader *)pg->data(), _container);
+        }
+        return (PageHeader *)pg->data();
+    }
+
+    void split(PageHeader *hdr, PutEntry &entry) {
+
+        u32 len = byte2page(hdr->bytes);
+        auto next_pg = _db->getPageCache()->alloc(
+            _db->getPageAllocator()->allocPage(len),
+            _db->getPageSize(), len);
+        auto next_hdr = (PageHeader *)next_pg->data();
+
+        PageHeader::init(next_hdr, len, hdr->next); 
+        hdr->next = next_pg->getId();
+
+        LeafContainer next_container(_container);
+        containerReset(next_hdr, next_container);
+
+        entry.val = next_pg->getId();
+        entry.key = _container.splitTo(next_container);
+        entry.update = true;
+        
+        next_pg->write(_db->getFileManager());
+    }
+
+    bool borrow(DelEntry &entry) {
+
+        auto [hdr, pg] = handlePage();
+        auto next = _map->get(hdr->next);
+        auto [next_hdr, next_pg] = next->handlePage();
+        auto &next_container = next->_container;
+
+        if(!hasmore(next_hdr)) {
+            return false;
+        }
+
+        hdr = handleOverFlow(pg, _container.elemSize(
+                next_container.key(0), next_container.val(0)));
+
+        entry.key = _container.borrowFrom(next_container, entry.delim);
+        entry.update = true;
+        next_pg->write(_db->getFileManager());
+        return true;
+    }
+
+    void merge(DelEntry &entry) {
+
+        auto [hdr, pg] = handlePage();
+        auto next = _map->get(hdr->next);
+        auto [next_hdr, next_pg] = next->handlePage();
+        auto &next_container = next->_container;
+
+        hdr = handleOverFlow(pg, next_hdr->bytes);
+
+        _container.mergeFrom(next_container, entry.delim);
+        entry.del = true;
+
+        auto ret = hdr->next;
+        // set next
+        hdr->next = next_hdr->next;
+        // 1. free page buffer on memory and page id on disk
+        next_pg->free(_db->getPageAllocator());
+        // 2. del page at cache
+        _db->getPageCache()->del(ret);
+        // 3. del node on map
+        _map->del(ret);
+    }
+
+    // ==================================================================
+
     std::tuple<bool, Status> 
-    tryPut(KType &key, VType &val, Mutex_t &par_mtx) {
+    tryPut(std::string &key, std::string &val, Mutex_t &par_mtx) {
         std::lock_guard lg(_shmtx);
         par_mtx.unlock_shared();
         
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         // only leafcontainer have to find
         if(_container.find(key)) {
             return std::make_tuple(true, Status(error::keyRepeat));
@@ -40,48 +132,38 @@ public:
             return std::make_tuple(false, Status());
         }
 
-        auto extbytes = _container.elemSize(key, val);
-        // there enought space
-        if(pg->overFlow(extbytes)) {
-            hdr = (PageHeader *)pg->extend(_db->getPageAllocator(), extbytes);
-            containerReset(hdr, _container);
-        }
+        hdr = handleOverFlow(pg, _container.elemSize(key, val));
         _container.put(key, val);
+
         pg->write(_db->getFileManager());
         return std::make_tuple(true, Status());
     }
 
-    Status put(KType &key, VType &val, PutEntry<KType> &entry) {
+    Status put(std::string &key, std::string &val, PutEntry &entry) {
 
         std::lock_guard lg(_shmtx);
-        auto [hdr, pg] = handlePage(_container);
-        // func tryPut() have do this.
+
+        auto [hdr, pg] = handlePage();
         assert(!_container.find(key));
+        hdr = handleOverFlow(pg, _container.elemSize(key, val));
 
-        auto extbytes = _container.elemSize(key, val);
-        // there enought space
-        if(pg->overFlow(extbytes)) {
-            hdr = (PageHeader *)pg->extend(_db->getPageAllocator(), extbytes);
-            containerReset(hdr, _container);
-        }
         _container.put(key, val);
-
-        // must split here.
-        assert(ifsplit(hdr));
-        DEBUGOUT("===> leafnode split");
-
-        split(hdr, entry, _container);
-        entry.update = true;
+        // we need to judge again, because other thread may do this.
+        if(ifsplit(hdr)) {
+            DEBUGOUT("===> leafnode split");
+            // do split
+            split(hdr, entry);
+        }
         pg->write(_db->getFileManager());
         return Status();
     }
 
     std::tuple<bool, Status> 
-    tryDel(KType &key, Mutex_t &par_mtx) {
+    tryDel(std::string &key, Mutex_t &par_mtx) {
         std::lock_guard lg(_shmtx);
         par_mtx.unlock_shared();
 
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         // the key is not exist
         if(!_container.find(key)) {
             return std::make_tuple(true, Status(error::keyNotFind));
@@ -96,44 +178,40 @@ public:
         return std::make_tuple(true, Status());
     }
 
-
-    Status del(KType &key, DelEntry<KType> &entry) {
+    Status del(std::string &key, DelEntry &entry) {
 
         std::lock_guard lg(_shmtx);
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         // the key is not exist
         assert(_container.find(key));
 
         _container.del(key);
 
-        assert(ifmerge(hdr));
-        auto &next_container = _map->get(hdr->next)->_container;
-        // special 
-        if(entry.last || !hdr->next) {
+        //assert(ifmerge(hdr));
+        // judge again 
+        if(!ifmerge(hdr) || entry.last || !hdr->next) {
             goto done;
         }
 
         DEBUGOUT("===> leafnode borrow");
-        if(borrow(hdr, pg, entry, _container, next_container)) {
+        if(borrow(entry)) {
             goto done;
         }
-
         DEBUGOUT("===> leafnode merge");
-        // 3. del node on map
-        _map->del(merge(hdr, pg, entry, _container, next_container));
+        merge(entry);
 done:
         pg->write(_db->getFileManager());
         return Status(); 
     }
 
-    Status get(KType &key, VType &val, 
+    Status get(std::string &key, std::string &val, 
             Mutex_t &par_mtx) {
 
         // shared lock guard for self and unlock parent.
         std::shared_lock lg(_shmtx);
         par_mtx.unlock_shared();
 
-        handlePage(_container);
+        handlePage();
         if(!_container.find(key)) {
             return Status(error::keyNotFind);
         }
@@ -141,14 +219,14 @@ done:
         return Status();
     }
 
-    Status update(KType &key, VType &val, 
+    Status update(std::string &key, std::string &val, 
             Mutex_t &par_mtx) {
 
         // lock guard for self and unlock parent.
         std::lock_guard lg(_shmtx);
         par_mtx.unlock_shared();
 
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         if(!_container.find(key)) {
             return Status(error::keyNotFind);
         }
@@ -169,11 +247,11 @@ done:
     // =====================================================
 
     std::tuple<Iter_t, PagePtr> begin() {
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         return std::make_tuple(_container.begin(), pg);
     }
-    std::tuple<Iter_t, PagePtr> at(KType &key) {
-        auto [hdr, pg] = handlePage(_container);
+    std::tuple<Iter_t, PagePtr> at(std::string &key) {
+        auto [hdr, pg] = handlePage();
         return std::make_tuple(_container.at(key), pg);
     }
 
@@ -187,7 +265,7 @@ done:
     }
     // !!!without lock
     LeafNode *next() {
-        auto [hdr, pg] = handlePage(_container);
+        auto [hdr, pg] = handlePage();
         if(hdr->next == 0) {
             return nullptr;
         }
@@ -195,7 +273,7 @@ done:
     }
 
 private:
-    ContainerType        _container;
+    LeafContainer         _container;
     NodeMap<LeafNode>    *_map;
 };
 

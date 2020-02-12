@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <mutex>
 #include <cassert>
 #include "common.h"
 
@@ -22,6 +23,7 @@ public:
         _file.close(); 
     }
     void read(char *p, u32 cnt, u32 pos) {
+        std::lock_guard lg(_mtx);
         _file.seekg(pos);
         _file.read(p, cnt);
         _file.clear();
@@ -33,6 +35,7 @@ public:
     }
     // without flush
     void writebuffer(char *p, u32 cnt, u32 pos) {
+        std::lock_guard lg(_mtx);
         _file.seekp(pos);
         _file.write(p, cnt);
     }
@@ -47,6 +50,7 @@ public:
 private:
     std::string _path;
     std::fstream _file;
+    std::mutex _mtx;
 };
 
 }// namespace bptdb

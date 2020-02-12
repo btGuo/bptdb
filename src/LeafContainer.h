@@ -1,131 +1,261 @@
 #ifndef __LEAF_CONTAINER_H
 #define __LEAF_CONTAINER_H
 
+#include <string>
+#include <string_view>
+#include <vector>
+#include <cassert>
 #include <cstring>
 #include <type_traits>
 #include <algorithm>
+#include <tuple>
 #include "common.h"
 
 namespace bptdb {
 
-enum class IterMoveType {
-    Forward, BackWard,
-};
-
-template <typename KType, typename VType, typename Comp>
 class LeafContainer {
-
-    static_assert(std::is_pod<KType>::value && 
-                  std::is_pod<VType>::value);
 public:
     struct Elem {
-        KType key;
-        VType val;
+        u32 keylen;
+        u32 vallen;
     };
     class Iterator {
         friend class LeafContainer;
     public:
-        Iterator(){}
+        Iterator() = default;
         Iterator(int pos, LeafContainer *con) {
             _pos = pos;
             _con = con;
-            _key = _con->key(_pos);
-            _val = _con->val(_pos);
-            _id  = ids++;
         }
-        KType key() { return _key; }
-        VType val() { return _val; }
+        void next() {
+            _pos++;
+        }
+        std::string_view key() { return _con->_keys[_pos]; }
+        std::string_view val() { return key2val(key());    }
         bool done() {
             return _pos == *(_con->_size);    
-        }
-        bool valid() {
-            return _con->valid;
         }
         bool lastElem() {
             return _pos + 1 == *(_con->_size);
         }
     private:
-        KType _key;
-        VType _val;
+        std::string_view key2val(std::string_view key) {
+            auto elem = (Elem *)(key.data() - sizeof(Elem));
+            return std::string_view(
+                key.data() + elem->keylen, elem->vallen);
+        }
+        int           _pos{0};
         LeafContainer *_con{nullptr};
-        int _pos{0};
-        u32 _id;
-        static u32 ids;
     };
-    LeafContainer() = default;
 
-    KType key(u32 pos) {
-        return KType();
+    // ===============================================
+
+    // get key and val at pos
+    std::string key(u32 pos) {
+        auto key = _keys[pos];
+        return std::string(key.data(), key.size());
     }
-    VType val(u32 pos) {
-        return VType();
+    std::string val(u32 pos) {
+        return key2val(_keys[pos]);
+    }
+    std::string key2val(std::string_view key) {
+        auto elem = (Elem *)(key.data() - sizeof(Elem));
+        return std::string(
+            key.data() + elem->keylen, elem->vallen);
     }
 
-    //TODO
-    // ==============================================
+    // ===============================================
+    
+    // get iteration
     Iterator begin() {
         return Iterator(0, this);
     }
-    Iterator upper(KType &key) {
-        return Iterator();
+    Iterator at(std::string &key) {
+        auto it = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+        if((it == _keys.end()) || _cmp(key, *it)) {
+            return Iterator();
+        }
+        return Iterator(it - _keys.begin(), this);
     }
-    Iterator lower(KType &key) {
-        return Iterator();
+    //================================================
+    LeafContainer(comparator_t cmp): _cmp(cmp) {}
+    LeafContainer(LeafContainer &other): _cmp(other._cmp) {}
+
+    void push_back(std::string &&key, std::string &&val) {
+        _put(_end, key, val);
     }
-    Iterator at(KType &key) {
-        return Iterator();
+    void put(std::string &key, std::string &val) {
+        auto ret = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+
+        char *it = nullptr;
+        if(ret == _keys.end()) {
+            it = _end;
+        }else {
+            it = const_cast<char *>(ret->data()) - sizeof(Elem);
+        }
+        _put(it, key, val);
     }
-    void updateIter(Iterator &iter, IterMoveType type) {
-    }
-    // =============================================
-    bool find(KType &key) {
-        Elem *begin = (Elem *)_data;
-        Elem *end = begin + _size;
+    bool find(std::string &key) {
+        //updateVec();
         return std::binary_search(
-            begin, end, key, [this](const Elem &a, const Elem &b){
-                return _cmp(a.key, b.key);
-            });
+            _keys.begin(), _keys.end(), key, _cmp);
     }
-    VType get(KType &key) {
-        return VType();
-    }
-    
-    void put(KType &key, VType &val) {
-
+    std::string get(std::string &key) {
+        auto ret = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+        assert(ret != _keys.end());
+        return key2val(*ret);
     }
 
-    void update(KType &key, VType &val) {
+    // del at pos it
+    void _del(char *it) {
+        auto elem = (Elem *)it;
+        auto size = elemSize(elem);
+        auto next = it + size;
+        std::memmove(it, next, _end - next);
 
+        (*_size)--;
+        (*_bytes) -= size;
+        _end -= size;
+        updateVec();
     }
 
-    void del(KType &key) {
+    void del(std::string &key) {
+        auto ret = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+        assert(ret != _keys.end() && *ret == key);
+        auto it = const_cast<char *>(ret->data()) - sizeof(Elem);
 
+        _del(it);
+    }
+    void update(std::string &key, std::string &val) {
+        auto ret = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+
+        assert(ret != _keys.end());
+
+        auto it = const_cast<char *>(ret->data()) - sizeof(Elem);
+        auto elem = (Elem *)it;
+        auto next = it + elemSize(elem);
+        int delta = (int)val.size() - (int)elem->vallen;
+        std::memmove(next + delta, next, _end - next);
+        elem->vallen = val.size();
+        char *data = (char *)(elem + 1) + elem->keylen;
+        std::memcpy(data, val.data(), elem->vallen);
+        
+        (*_bytes) += delta;
+        _end += delta;
+        updateVec();
+    }
+    void pop_front() {
+        _del(_data);
     }
 
-    KType splitTo(LeafContainer &other) {
-        return KType();
+    std::string splitTo(LeafContainer &other) {
+        auto pos = *_size / 2;
+        auto str = _keys[pos];
+        auto it = str.data() - sizeof(Elem);
+        //XXX
+        auto ret = std::string(str.data(), str.size());
+        u32 rentbytes = (_end - it);
+        u32 rentsize = (*_size - pos);
+
+        *other._size += rentsize;
+        *other._bytes += rentbytes;
+        other._end = other._data + rentbytes;
+        std::memcpy(other._data, it, rentbytes);
+        other.updateVec();
+        
+        *_size -= rentsize;
+        *_bytes -= rentbytes;
+        _end -= rentbytes;
+        updateVec();
+        return ret;
     }
 
+    // the parameter ignore is for compatibility with InnerContainer 
+    std::string borrowFrom(LeafContainer &other, std::string &ignore) {
+        // convert string_view to string at once. other._keys[1] will 
+        // be unavailable after other.pop_front().
+        auto str = other._keys[1];
+        auto ret = std::string(str.data(), str.size());
+        push_back(other.key(0), other.val(0));
+        other.pop_front();
+        return ret;
+    }
+
+    // the parameter ignore is for compatibility with InnerContainer 
+    void mergeFrom(LeafContainer &other, std::string &ignore) {
+        *_size += *other._size;
+        // we should not use other._bytes which include the 
+        // node header bytes
+        u32 bytes = other._end - other._data;
+        *_bytes += bytes;
+        std::memcpy(_end, other._data, bytes);
+        _end += bytes;
+        updateVec();
+    }
+    u32 elemSize(std::string &key, std::string &val) { 
+        return sizeof(Elem) + key.size() + val.size(); 
+    }
+    u32 elemSize(std::string &&key, std::string &&val) { 
+        return sizeof(Elem) + key.size() + val.size(); 
+    }
     void reset(u32 *bytes, 
             u32 *size, char *data) {
         _size = size;
         _bytes = bytes;
         _data = data;
+        // notice! we don't set the _end here.
+        updateVec();
     }
-    u32 elemSize(KType &key, VType &val) { return sizeof(Elem); }
+    u32 size() { return *_size; }
+    bool raw() { return !_data; }
 private:
-    char *_data{nullptr};
-    Comp _cmp;
-    u32 *_size{nullptr};
+    //put key and val at pos it
+    void _put(char *it, std::string &key, std::string &val) {
+        auto size = elemSize(key, val);
+        std::memmove(it + size, it, _end - it);
+        auto elem = (Elem *)it;
+        elem->keylen = key.size();
+        elem->vallen = val.size();
+        char *data = (char *)(elem + 1);
+        std::memcpy(data, key.data(), elem->keylen);
+        std::memcpy(data + elem->keylen, val.data(), elem->vallen);
+
+        // update header
+        (*_size)++;
+        (*_bytes) += size;
+        _end += size;
+        updateVec();
+    }
+    u32 elemSize(Elem *elem) {
+        return sizeof(Elem) + elem->keylen + elem->vallen;
+    }
+    void updateVec() {
+
+        _keys.resize(*_size);
+        Elem *elem = (Elem *)_data;
+        char *data = _data;
+        for(u32 i = 0; i < *_size; i++) {
+            _keys[i] = std::string_view(data + sizeof(Elem), elem->keylen);
+            data += elemSize(elem);
+            elem = (Elem *)data;
+        }
+        _end = data;
+    }
+    comparator_t _cmp;
+    // memory
+    std::vector<std::string_view> _keys;
+    char *_end{nullptr};
+    // disk
     u32 *_bytes{nullptr};
+    char *_data{nullptr};
+    u32 *_size{nullptr};
 };
 
-
-template <typename KType, typename VType, typename Comp>
-u32 LeafContainer<KType, VType, Comp>::Iterator::ids{0};
-
 }// namespace bptdb
-
-#include "__LeafContainer_1.h"
-
 #endif
+

@@ -26,6 +26,8 @@ PageAllocator::PageAllocator(pgid_t root, FileManager *fm, u32 page_size) {
 
 pgid_t PageAllocator::allocPage(u32 len) {
 
+    std::lock_guard lg(_mtx);
+
     auto hdr = (PageHeader *)_pg->data();
     auto begin = (Elem *)(hdr + 1);
     auto end = begin + hdr->size;
@@ -51,6 +53,8 @@ pgid_t PageAllocator::allocPage(u32 len) {
 }
 
 void PageAllocator::freePage(pgid_t pos, u32 len) {
+
+    std::lock_guard lg(_mtx);
 
     assert(len);
     Elem cur{pos, len};
@@ -101,6 +105,9 @@ void PageAllocator::freePage(pgid_t pos, u32 len) {
 }
 
 pgid_t PageAllocator::reallocPage(pgid_t pos, u32 len, u32 newlen) {
+
+//    std::lock_guard lg(_mtx);
+
     auto hdr = (PageHeader *)_pg->data();
     //self
     if(pos == hdr->res) {

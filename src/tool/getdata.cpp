@@ -10,7 +10,7 @@ int main() {
     assert(in.is_open());
     string str;
     set<string> s;
-    int size = 16384;
+    int size = 655360;
     while(size-- && !in.eof()) {
         in >> str;
         s.insert(str);

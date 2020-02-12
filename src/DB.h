@@ -5,7 +5,12 @@
 #include <memory>
 #include <string_view>
 #include <functional>
+#include <algorithm>
 #include "Status.h"
+#include "PageAllocator.h"
+#include "PageCache.h"
+#include "FileManager.h"
+#include "Bucket.h"
 #include "common.h"
 
 namespace bptdb {
@@ -15,24 +20,9 @@ struct Option {
     u32 max_buffer_pages{8192};
 };
 
-template <typename KType, typename VType, typename OrderType>
 class Bptree;
 
-class FileManager;
-class PageCache;
-class PageAllocator;
-
 constexpr bool DB_CREATE = true;
-
-struct BptreeMeta {
-    pgid_t root;
-    pgid_t first;
-    u32 height;
-    u32 order;
-    u64 keytype;
-    u64 valtype;
-    u64 cmptype;
-};
 
 class DB {
 public:
@@ -46,8 +36,11 @@ public:
     Status open(std::string path, bool creat = false, Option option = Option());
     Status create(std::string path, Option option = Option());
 
-    Status createBucket(std::string name, BptreeMeta &meta);
-    Status getBucket(std::string name, BptreeMeta &meta);
+    std::tuple<Status, Bucket>
+    createBucket(std::string name, comparator_t cmp = std::less<std::string_view>());
+
+    std::tuple<Status, Bucket>
+    getBucket(std::string name, comparator_t cmp = std::less<std::string_view>());
 
     void updateRoot(std::string &name, pgid_t newroot, u32 height);
     void show();
@@ -65,9 +58,8 @@ public:
         return _meta.page_size;
     }
 private:
-    using Bucket_t = Bptree<std::string, BptreeMeta, keyOrder::ASCE>;
     void init(Option option);
-    std::unique_ptr<Bucket_t> _buckets;
+    std::shared_ptr<Bptree>        _buckets;
     std::string                    _path;
     std::unique_ptr<FileManager>   _fm;
     std::unique_ptr<PageAllocator> _pa;

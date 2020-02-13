@@ -87,19 +87,19 @@ public:
 
     //====================================================================
 
-    Status get(std::string key, std::string &val) {
+    Status get(std::string &key, std::string &val) {
         _root_mtx.lock_shared();
         auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
         return _leaf_map.get(nodeid)->get(key, val, mutex);
     }
 
-    Status update(std::string key, std::string val) {
+    Status update(std::string &key, std::string &val) {
         _root_mtx.lock_shared();
         auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
         return  _leaf_map.get(nodeid)->update(key, val, mutex);
     }
 
-    Status put(std::string key, std::string val) {
+    Status put(std::string &key, std::string &val) {
         {
             //try put at first.
             _root_mtx.lock_shared();
@@ -140,7 +140,7 @@ public:
         return stat;
     }
 
-    Status del(std::string key) {
+    Status del(std::string &key) {
         {
             //try put at first.
             _root_mtx.lock_shared();

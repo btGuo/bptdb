@@ -26,7 +26,7 @@ public:
         _page_count++;
         std::lock_guard lg(_mtx);
         if(_page_count > _max_page) {
-
+            DEBUGOUT("page drop");
             auto pg = _lru.pop_back();    
             _cache.erase(pg->getId());
         }

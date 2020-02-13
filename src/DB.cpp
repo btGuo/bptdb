@@ -33,6 +33,8 @@ Status DB::open(std::string path, bool creat, Option option) {
     _fm = std::make_unique<FileManager>(_path);
     // read meta
     _fm->read((char *)&_meta, sizeof(Meta), 0);
+    _pw = std::make_unique<PageWriter>(_fm.get());
+    _pw->start();
     _pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     _pa = std::make_unique<PageAllocator>(_meta.freelist_id, 
                                           _fm.get(), _meta.page_size);
@@ -65,10 +67,12 @@ void DB::init(Option option) {
     tree_meta->root = 2;
     tree_meta->first = 2;
     tree_meta->height = 1;
-    tree_meta->order = 128;
+    tree_meta->order = 96;
 
     // create filemanager firstly
     _fm = std::make_unique<FileManager>(_path);
+    _pw = std::make_unique<PageWriter>(_fm.get());
+    _pw->start();
 
     // write meta
     _fm->write((char *)&_meta, sizeof(_meta), 0);

@@ -18,10 +18,10 @@ public:
     Bucket();
     ~Bucket();
     Bucket(std::string &name, BptreeMeta &meta, DB *db, comparator_t cmp);
-    Status get(std::string key, std::string &val);
-    Status update(std::string key, std::string val);
-    Status put(std::string key, std::string val);
-    Status del(std::string key);
+    Status get(std::string &key, std::string &val);
+    Status update(std::string &key, std::string &val);
+    Status put(std::string &key, std::string &val);
+    Status del(std::string &key);
     std::shared_ptr<IteratorBase> begin();
     std::shared_ptr<IteratorBase> at(std::string &key);
 private:

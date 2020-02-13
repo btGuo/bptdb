@@ -32,7 +32,7 @@ void *Page::read(FileManager *fm) {
     auto hdr = (PageHeader *)_data;
     _data_pgs = byte2page(hdr->bytes);
     u32 datapages = _data_pgs;
-    //std::cout << "datapages " << datapages << "\n";
+    std::cout << "datapages " << datapages << "\n";
 
     _data = (char *)std::realloc(_data, datapages * _page_size);
     // 更新header

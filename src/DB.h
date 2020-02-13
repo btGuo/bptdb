@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "Status.h"
 #include "PageAllocator.h"
+#include "PageWriter.h"
 #include "PageCache.h"
 #include "FileManager.h"
 #include "Bucket.h"
@@ -54,6 +55,9 @@ public:
     PageCache *getPageCache() {
         return _pc.get();
     }
+    PageWriter *getPageWriter() {
+        return _pw.get();
+    }
     u32 getPageSize() {
         return _meta.page_size;
     }
@@ -64,6 +68,7 @@ private:
     std::unique_ptr<FileManager>   _fm;
     std::unique_ptr<PageAllocator> _pa;
     std::unique_ptr<PageCache>     _pc;
+    std::unique_ptr<PageWriter>    _pw;
     Meta                           _meta;
 };
 

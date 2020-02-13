@@ -4,19 +4,19 @@
 
 namespace bptdb {
 
-Status Bucket::get(std::string key, std::string &val) {
+Status Bucket::get(std::string &key, std::string &val) {
     return _impl->get(key, val);
 }
 
-Status Bucket::update(std::string key, std::string val) {
+Status Bucket::update(std::string &key, std::string &val) {
     return _impl->update(key, val);
 }
 
-Status Bucket::put(std::string key, std::string val) {
+Status Bucket::put(std::string &key, std::string &val) {
     return _impl->put(key, val);
 }
 
-Status Bucket::del(std::string key) {
+Status Bucket::del(std::string &key) {
     return _impl->del(key);
 }
 

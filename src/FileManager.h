@@ -29,6 +29,7 @@ public:
         _file.clear();
     }
     void write(char *p, u32 cnt, u32 pos) {
+        std::lock_guard lg(_mtx);
         _file.seekp(pos);
         _file.write(p, cnt);
         _file.flush();
@@ -40,11 +41,13 @@ public:
         _file.write(p, cnt);
     }
     u32 fileSize() {
+        std::lock_guard lg(_mtx);
         _file.seekg(0, std::ios_base::end);
         std::streampos sp = _file.tellg();
         return sp;
     }
     void flush() {
+        std::lock_guard lg(_mtx);
         _file.flush();
     }
 private:

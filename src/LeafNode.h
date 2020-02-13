@@ -3,6 +3,7 @@
 
 #include <memory>
 #include "Node.h"
+#include "PageWriter.h"
 #include "LeafContainer.h"
 
 // maintain next_container._container
@@ -31,7 +32,6 @@ public:
         PagePtr pg = _db->getPageCache()->get(_id);
         if(!pg) {
             pg = _db->getPageCache()->alloc(_id, _db->getPageSize());
-            //_db->getPageCache()->put(pg);
             hdr = (PageHeader *)pg->read(_db->getFileManager());
             containerReset(hdr, _container);
         }else {
@@ -42,7 +42,6 @@ public:
         }
         return std::make_tuple(hdr, pg);
     }
-
     PageHeader *handleOverFlow(PagePtr pg, u32 extbytes) {
         if(pg->overFlow(extbytes)) {
             pg->extend(_db->getPageAllocator(), extbytes);
@@ -69,7 +68,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        next_pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(next_pg);
     }
 
     bool borrow(DelEntry &entry) {
@@ -88,7 +87,7 @@ public:
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        next_pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(next_pg);
         return true;
     }
 
@@ -123,19 +122,17 @@ public:
         par_mtx.unlock_shared();
         
         auto [hdr, pg] = handlePage();
-        // only leafcontainer have to find
-        if(_container.find(key)) {
-            return std::make_tuple(true, Status(error::keyRepeat));
-        }
 
         if(!safetoput(hdr)) {
             return std::make_tuple(false, Status());
         }
 
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
-        _container.put(key, val);
+        if(!_container.put(key, val)) {
+            return std::make_tuple(true, Status(error::keyRepeat));
+        }
 
-        pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(pg);
         return std::make_tuple(true, Status());
     }
 
@@ -144,7 +141,7 @@ public:
         std::lock_guard lg(_shmtx);
 
         auto [hdr, pg] = handlePage();
-        assert(!_container.find(key));
+        //assert(!_container.find(key));
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
 
         _container.put(key, val);
@@ -154,7 +151,7 @@ public:
             // do split
             split(hdr, entry);
         }
-        pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(pg);
         return Status();
     }
 
@@ -174,7 +171,7 @@ public:
         }
 
         _container.del(key);
-        pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(pg);
         return std::make_tuple(true, Status());
     }
 
@@ -200,7 +197,7 @@ public:
         DEBUGOUT("===> leafnode merge");
         merge(entry);
 done:
-        pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(pg);
         return Status(); 
     }
 
@@ -212,10 +209,9 @@ done:
         par_mtx.unlock_shared();
 
         handlePage();
-        if(!_container.find(key)) {
+        if(!_container.get(key, val)) {
             return Status(error::keyNotFind);
         }
-        val = _container.get(key);
         return Status();
     }
 
@@ -238,7 +234,7 @@ done:
             containerReset(hdr, _container);
         }
         _container.update(key, val);
-        pg->write(_db->getFileManager());
+        _db->getPageWriter()->write(pg);
 
         return Status();
     }

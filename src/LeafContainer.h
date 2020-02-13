@@ -83,58 +83,51 @@ public:
     LeafContainer(LeafContainer &other): _cmp(other._cmp) {}
 
     void push_back(std::string &&key, std::string &&val) {
-        _put(_end, key, val);
+        _put(_keys.end(), key, val);
     }
-    void put(std::string &key, std::string &val) {
+    bool put(std::string &key, std::string &val) {
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
-
-        char *it = nullptr;
-        if(ret == _keys.end()) {
-            it = _end;
-        }else {
-            it = const_cast<char *>(ret->data()) - sizeof(Elem);
+        if(ret != _keys.end() && !_cmp(key, *ret)) {
+            return false;
         }
-        _put(it, key, val);
+        _put(ret, key, val);
+        return true;
     }
     bool find(std::string &key) {
-        //updateVec();
         return std::binary_search(
             _keys.begin(), _keys.end(), key, _cmp);
     }
-    std::string get(std::string &key) {
+    bool get(std::string &key, std::string &val) {
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
-        assert(ret != _keys.end());
-        return key2val(*ret);
+        if(ret == _keys.end() || _cmp(key, *ret)) {
+            return false;
+        }
+        val = key2val(*ret);
+        return true;
     }
 
-    // del at pos it
-    void _del(char *it) {
-        auto elem = (Elem *)it;
-        auto size = elemSize(elem);
-        auto next = it + size;
-        std::memmove(it, next, _end - next);
-
-        (*_size)--;
-        (*_bytes) -= size;
-        _end -= size;
-        updateVec();
+    void pop_front() {
+        _del(_keys.begin());
     }
-
-    void del(std::string &key) {
-        auto ret = std::lower_bound(
-            _keys.begin(), _keys.end(), key, _cmp);
-        assert(ret != _keys.end() && *ret == key);
-        auto it = const_cast<char *>(ret->data()) - sizeof(Elem);
-
-        _del(it);
-    }
-    void update(std::string &key, std::string &val) {
+    bool del(std::string &key) {
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
 
-        assert(ret != _keys.end());
+        if(ret == _keys.end() || _cmp(key, *ret)) {
+            return false;
+        }
+        _del(ret);
+        return true;
+    }
+    bool update(std::string &key, std::string &val) {
+        auto ret = std::lower_bound(
+            _keys.begin(), _keys.end(), key, _cmp);
+
+        if(ret == _keys.end() || _cmp(key, *ret)) {
+            return false;
+        }
 
         auto it = const_cast<char *>(ret->data()) - sizeof(Elem);
         auto elem = (Elem *)it;
@@ -147,12 +140,9 @@ public:
         
         (*_bytes) += delta;
         _end += delta;
-        updateVec();
+        updateVec(ret - _keys.begin(), it);
+        return true;
     }
-    void pop_front() {
-        _del(_data);
-    }
-
     std::string splitTo(LeafContainer &other) {
         auto pos = *_size / 2;
         auto str = _keys[pos];
@@ -166,12 +156,12 @@ public:
         *other._bytes += rentbytes;
         other._end = other._data + rentbytes;
         std::memcpy(other._data, it, rentbytes);
-        other.updateVec();
+        other.updateVec(0, other._data);
         
         *_size -= rentsize;
         *_bytes -= rentbytes;
         _end -= rentbytes;
-        updateVec();
+        updateVec(*_size, _end);
         return ret;
     }
 
@@ -188,6 +178,8 @@ public:
 
     // the parameter ignore is for compatibility with InnerContainer 
     void mergeFrom(LeafContainer &other, std::string &ignore) {
+        auto size = *_size;
+        auto end = _end;
         *_size += *other._size;
         // we should not use other._bytes which include the 
         // node header bytes
@@ -195,7 +187,7 @@ public:
         *_bytes += bytes;
         std::memcpy(_end, other._data, bytes);
         _end += bytes;
-        updateVec();
+        updateVec(size, end);
     }
     u32 elemSize(std::string &key, std::string &val) { 
         return sizeof(Elem) + key.size() + val.size(); 
@@ -209,13 +201,22 @@ public:
         _bytes = bytes;
         _data = data;
         // notice! we don't set the _end here.
-        updateVec();
+        updateVec(0, _data);
     }
     u32 size() { return *_size; }
     bool raw() { return !_data; }
 private:
+    using VecIter_t = std::vector<std::string_view>::iterator;
     //put key and val at pos it
-    void _put(char *it, std::string &key, std::string &val) {
+    void _put(VecIter_t ret, std::string &key, std::string &val) {
+
+        char *it = nullptr;
+        if(ret == _keys.end()) {
+            it = _end;
+        }else {
+            it = const_cast<char *>(ret->data()) - sizeof(Elem);
+        }
+
         auto size = elemSize(key, val);
         std::memmove(it + size, it, _end - it);
         auto elem = (Elem *)it;
@@ -229,17 +230,32 @@ private:
         (*_size)++;
         (*_bytes) += size;
         _end += size;
-        updateVec();
+        updateVec(ret - _keys.begin(), it);
+    }
+    // del at pos it
+    void _del(VecIter_t ret) {
+
+        auto it = const_cast<char *>(ret->data()) - sizeof(Elem);
+        auto elem = (Elem *)it;
+        auto size = elemSize(elem);
+        auto next = it + size;
+        std::memmove(it, next, _end - next);
+
+        (*_size)--;
+        (*_bytes) -= size;
+        _end -= size;
+        updateVec(ret - _keys.begin(), it);
     }
     u32 elemSize(Elem *elem) {
         return sizeof(Elem) + elem->keylen + elem->vallen;
     }
-    void updateVec() {
+    void updateVec(u32 pos, char *data) {
+        pos = 0;
+        data = _data;
 
         _keys.resize(*_size);
-        Elem *elem = (Elem *)_data;
-        char *data = _data;
-        for(u32 i = 0; i < *_size; i++) {
+        Elem *elem = (Elem *)data;
+        for(u32 i = pos; i < *_size; i++) {
             _keys[i] = std::string_view(data + sizeof(Elem), elem->keylen);
             data += elemSize(elem);
             elem = (Elem *)data;

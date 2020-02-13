@@ -8,8 +8,6 @@
 
 using namespace std;
 
-#define handler_error(stat) do{ cout << stat.getErrmsg() << endl; return 0;}while(0)
-
 vector<pair<string, string>> getdata(string path, int size) {
     ifstream in(path);
     assert(in.is_open());
@@ -39,7 +37,8 @@ int main(int argc, char **argv) {
     if(!stat.ok()) {
         tie(stat, bucket) = db.createBucket("mybucket");
         if(!stat.ok()) {
-            handler_error(stat);
+            cout << stat.getErrmsg() << endl;
+            return 0;
         }
     }
 
@@ -53,32 +52,33 @@ int main(int argc, char **argv) {
     auto start = chrono::system_clock::now();
     if(option == 1) {
 
-        thread p1([bucket, &kvs, size]()mutable{
-            for(int i = 0; i < size / 2; i++) {
-                assert(bucket.put(kvs[i].first, kvs[i].second).ok());
-            }
-        });
+        //thread p1([bucket, &kvs, size]()mutable{
+        //    for(int i = 0; i < size / 2; i++) {
+        //        assert(bucket.put(kvs[i].first, kvs[i].second).ok());
+        //    }
+        //});
 
-        thread p2([bucket, &kvs, size]()mutable{
-            for(int i = size / 2; i < size; i++) {
-                assert(bucket.put(kvs[i].first, kvs[i].second).ok());
-            }
-        });
+        //thread p2([bucket, &kvs, size]()mutable{
+        //    for(int i = size / 2; i < size; i++) {
+        //        assert(bucket.put(kvs[i].first, kvs[i].second).ok());
+        //    }
+        //});
 
-        p1.join();
-        p2.join();
+        //p1.join();
+        //p2.join();
 
-        //for(int i = 0; i < size; i++) {
-        //    assert(bucket.put(kvs[i].first, kvs[i].second).ok());
-        //}
+        for(int i = 0; i < size; i++) {
+            assert(bucket.put(kvs[i].first, kvs[i].second).ok());
+        }
 
     }else if(option == 3) {
-        while(size--) {
+        for(int i = 0; i < size; i++) {
+            cout << i << endl;
             string val;
-            stat = bucket.get(kvs[size].first, val);
-            assert(stat.ok() && val == kvs[size].second);
-            //cout << size << " " << val << "\n";
+            stat = bucket.get(kvs[i].first, val);
+            assert(stat.ok() && val == kvs[i].second);
         }
+
     }else {
         cout << "option error\n";
     }

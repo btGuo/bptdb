@@ -3,7 +3,6 @@
 
 #include <memory>
 #include "Node.h"
-#include "PageWriter.h"
 #include "LeafContainer.h"
 
 // maintain next_container._container
@@ -68,7 +67,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        _db->getPageWriter()->write(next_pg);
+        _db->getWriteQueue()->push(next_pg);
     }
 
     bool borrow(DelEntry &entry) {
@@ -87,7 +86,7 @@ public:
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        _db->getPageWriter()->write(next_pg);
+        _db->getWriteQueue()->push(next_pg);
         return true;
     }
 
@@ -132,7 +131,7 @@ public:
             return std::make_tuple(true, Status(error::keyRepeat));
         }
 
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         return std::make_tuple(true, Status());
     }
 
@@ -144,14 +143,14 @@ public:
         //assert(!_container.find(key));
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
 
-        _container.put(key, val);
+        assert(_container.put(key, val));
         // we need to judge again, because other thread may do this.
         if(ifsplit(hdr)) {
             DEBUGOUT("===> leafnode split");
             // do split
             split(hdr, entry);
         }
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         return Status();
     }
 
@@ -161,17 +160,14 @@ public:
         par_mtx.unlock_shared();
 
         auto [hdr, pg] = handlePage();
-        // the key is not exist
-        if(!_container.find(key)) {
-            return std::make_tuple(true, Status(error::keyNotFind));
-        }
-
         if(!safetodel(hdr)) {
             return std::make_tuple(false, Status());
         }
-
-        _container.del(key);
-        _db->getPageWriter()->write(pg);
+        if(!_container.del(key)) {
+            return std::make_tuple(true, Status(error::keyNotFind));
+        }
+        _db->getWriteQueue()->push(pg);
+        std::cout << "trydel\n";
         return std::make_tuple(true, Status());
     }
 
@@ -179,17 +175,12 @@ public:
 
         std::lock_guard lg(_shmtx);
         auto [hdr, pg] = handlePage();
-        // the key is not exist
-        assert(_container.find(key));
 
-        _container.del(key);
-
-        //assert(ifmerge(hdr));
+        assert(_container.del(key));
         // judge again 
         if(!ifmerge(hdr) || entry.last || !hdr->next) {
             goto done;
         }
-
         DEBUGOUT("===> leafnode borrow");
         if(borrow(entry)) {
             goto done;
@@ -197,7 +188,7 @@ public:
         DEBUGOUT("===> leafnode merge");
         merge(entry);
 done:
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         return Status(); 
     }
 
@@ -223,18 +214,12 @@ done:
         par_mtx.unlock_shared();
 
         auto [hdr, pg] = handlePage();
-        if(!_container.find(key)) {
+        hdr = handleOverFlow(pg, _container.elemSize(key, val));
+
+        if(!_container.update(key, val)) {
             return Status(error::keyNotFind);
         }
-
-        auto extbytes = _container.elemSize(key, val);
-
-        if(pg->overFlow(extbytes)) {
-            hdr = (PageHeader *)pg->extend(_db->getPageAllocator(), extbytes);
-            containerReset(hdr, _container);
-        }
-        _container.update(key, val);
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
 
         return Status();
     }

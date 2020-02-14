@@ -16,11 +16,12 @@ void PageAllocator::newOnDisk(pgid_t root, FileManager *fm,
     pg.write(fm);
 }
 
-PageAllocator::PageAllocator(pgid_t root, FileManager *fm, u32 page_size) {
+PageAllocator::PageAllocator(pgid_t root, FileManager *fm, u32 page_size, WriteQue_t *wq) {
     _page_size = page_size;
     _root = root;
     _fm = fm;
-    _pg = std::make_unique<Page>(_root, page_size);
+    _wq = wq;
+    _pg = std::make_shared<Page>(_root, page_size);
     _pg->read(fm);
 }
 
@@ -37,6 +38,7 @@ pgid_t PageAllocator::allocPage(u32 len) {
         auto ret = hdr->next;
         hdr->next += len;
         _pg->write(_fm);
+        //_pg->write(_fm);
         return ret;
     }
     auto ret = it->pos;
@@ -49,6 +51,7 @@ pgid_t PageAllocator::allocPage(u32 len) {
         it->pos += len;
     }
     _pg->write(_fm);
+    //_pg->write(_fm);
     return ret;
 }
 
@@ -106,12 +109,11 @@ void PageAllocator::freePage(pgid_t pos, u32 len) {
 
 pgid_t PageAllocator::reallocPage(pgid_t pos, u32 len, u32 newlen) {
 
-//    std::lock_guard lg(_mtx);
-
+    std::lock_guard lg(_mtx);
     auto hdr = (PageHeader *)_pg->data();
     //self
     if(pos == hdr->res) {
-        //std::cout << "self\n";
+        DEBUGOUT("self reallocPage");
         _tmp = {pos, len};
         return allocPage(newlen);
     }

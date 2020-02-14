@@ -12,11 +12,12 @@ namespace bptdb {
 
 class FileManager {
 public:
-    FileManager(std::string path): _file(path, 
+    FileManager(std::string path, bool sync): _file(path, 
         std::ios::binary | std::ios::out | std::ios::in) {
 
         assert(_file.is_open());
         _path = path;
+        _sync = sync;
     }
 
     ~FileManager() { 
@@ -32,13 +33,7 @@ public:
         std::lock_guard lg(_mtx);
         _file.seekp(pos);
         _file.write(p, cnt);
-        _file.flush();
-    }
-    // without flush
-    void writebuffer(char *p, u32 cnt, u32 pos) {
-        std::lock_guard lg(_mtx);
-        _file.seekp(pos);
-        _file.write(p, cnt);
+        if(_sync) _file.flush();
     }
     u32 fileSize() {
         std::lock_guard lg(_mtx);
@@ -46,14 +41,11 @@ public:
         std::streampos sp = _file.tellg();
         return sp;
     }
-    void flush() {
-        std::lock_guard lg(_mtx);
-        _file.flush();
-    }
 private:
-    std::string _path;
+    std::string  _path;
     std::fstream _file;
-    std::mutex _mtx;
+    std::mutex   _mtx;
+    bool         _sync;
 };
 
 }// namespace bptdb

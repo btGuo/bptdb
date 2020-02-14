@@ -33,7 +33,7 @@ void general_data(ofstream &out, int size, vector<char> &dict) {
     assert(out.is_open());
     for(int i = 0; i < size; i++) {
         string key = randstr(10, 40, dict);
-        string val = randstr(10, 40, dict);
+        string val = randstr(50, 100, dict);
         out << key << " " << val << " ";
     }
 }

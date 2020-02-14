@@ -2,6 +2,7 @@
 #include <string_view>
 #include <algorithm>
 #include <cstdlib>
+#include <thread>
 #include <cstring>
 #include "DB.h"
 #include "PageAllocator.h"
@@ -30,16 +31,17 @@ Status DB::open(std::string path, bool creat, Option option) {
     // database exist
     // init member data
     _path = path;
-    _fm = std::make_unique<FileManager>(_path);
+    _fm = std::make_shared<FileManager>(_path, option.sync);
+    _write_que = std::make_shared<WriteQue_t>();
     // read meta
     _fm->read((char *)&_meta, sizeof(Meta), 0);
-    _pw = std::make_unique<PageWriter>(_fm.get());
-    _pw->start();
     _pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     _pa = std::make_unique<PageAllocator>(_meta.freelist_id, 
-                                          _fm.get(), _meta.page_size);
+                                          _fm.get(), _meta.page_size, _write_que.get());
     _buckets = std::make_shared<Bptree>(
         "__BUCKET_TREE__", _meta.bucket_tree_meta, this, std::less<std::string_view>());
+
+    startWriteThread();
     return Status();
 }
 Status DB::create(std::string path, Option option) {
@@ -70,9 +72,8 @@ void DB::init(Option option) {
     tree_meta->order = 96;
 
     // create filemanager firstly
-    _fm = std::make_unique<FileManager>(_path);
-    _pw = std::make_unique<PageWriter>(_fm.get());
-    _pw->start();
+    _fm = std::make_shared<FileManager>(_path, option.sync);
+    _write_que = std::make_shared<WriteQue_t>();
 
     // write meta
     _fm->write((char *)&_meta, sizeof(_meta), 0);
@@ -83,7 +84,7 @@ void DB::init(Option option) {
     // create basic utils
     _pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     _pa = std::make_unique<PageAllocator>(_meta.freelist_id, _fm.get(), 
-                                          _meta.page_size);
+                                          _meta.page_size, _write_que.get());
 
     auto meta = _meta.bucket_tree_meta;
     // the id of bucket must be 2
@@ -92,6 +93,8 @@ void DB::init(Option option) {
     // create bucket tree
     _buckets = std::make_shared<Bptree>(
         "__BUCKET_TREE__", meta, this, std::less<std::string_view>());
+
+    startWriteThread();
 }
 
 std::tuple<Status, Bucket> 
@@ -148,6 +151,22 @@ void DB::updateRoot(std::string &name, pgid_t newroot, u32 height) {
 
 void DB::show() {
     _pa->show();
+}
+
+void DB::startWriteThread() {
+    //return;
+    _th = std::thread([](std::shared_ptr<FileManager> fm,
+                      std::shared_ptr<WriteQue_t>  wq){
+        for(;;) {
+            PagePtr pg;
+            wq->waitAndPop(pg);
+            if(!pg) {
+                DEBUGOUT("write thread exit");
+                break;
+            }
+            pg->write(fm.get());
+        }
+    }, _fm, _write_que);
 }
 
 }// namespace bptdb

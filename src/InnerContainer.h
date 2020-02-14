@@ -26,34 +26,7 @@ public:
         u32 keylen;
         pgid_t val;
     };
-    // =======================================
-    class Iterator{
-        friend class InnerContainer;
-    public:
-        Iterator() = default;
-        Iterator(int pos, InnerContainer *con) {
-            _pos = pos;
-            _con = con;
-        }
-        void next() {
-            _pos++;
-        }
-        std::string key() { return _con->key(_pos); }
-        pgid_t val() { return _con->val(_pos); }
-        bool done() {
-            return _pos == *(_con->_size);    
-        }
-        bool lastElem() {
-            return _pos + 1 == *(_con->_size);
-        }
-    private:
-        int           _pos{0};
-        InnerContainer *_con{nullptr};
-    };
 
-    Iterator begin() {
-        return Iterator(0, this);
-    }
     pgid_t head() {
         return *_head;
     }

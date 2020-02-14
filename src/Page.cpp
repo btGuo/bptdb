@@ -8,11 +8,13 @@
 namespace bptdb {
 
 Page::Page(pgid_t id, u32 page_size) {
+    assert(id > 0);
     _id = id;
     _page_size = page_size;
 }
 
 Page::Page(pgid_t id, u32 page_size, u32 data_pgs) {
+    assert(id > 0);
     _id = id;
     _page_size = page_size;
     _data_pgs = data_pgs;
@@ -32,7 +34,9 @@ void *Page::read(FileManager *fm) {
     auto hdr = (PageHeader *)_data;
     _data_pgs = byte2page(hdr->bytes);
     u32 datapages = _data_pgs;
-    std::cout << "datapages " << datapages << "\n";
+
+    //std::cout << "datapages " << datapages << "\n";
+    assert(datapages > 0);
 
     _data = (char *)std::realloc(_data, datapages * _page_size);
     // 更新header
@@ -77,12 +81,11 @@ void *Page::extend(PageAllocator *pa, u32 extbytes) {
 void Page::writeBatch(FileManager *fm, 
         std::vector<std::shared_ptr<Page>> &pages) {
     for(auto &pg: pages) {
-        pg->_write(fm);
+        pg->write(fm);
     }
-    fm->flush();
 }
 
-void Page::_write(FileManager *fm) {
+void Page::write(FileManager *fm) {
     assert(_data);
     auto hdr = (PageHeader *)_data;
     u32 total = _data_pgs;
@@ -95,17 +98,12 @@ void Page::_write(FileManager *fm) {
     }
 }
 
-void Page::write(FileManager *fm) {
-    _write(fm);
-    fm->flush();
-}
-
 void Page::_readPage(FileManager *fm, char *buf, u32 cnt, u32 pos) {
     fm->read(buf, cnt * _page_size, pos * _page_size);
 }
 
 void Page::_writePage(FileManager *fm, char *buf, u32 cnt, u32 pos) {
-    fm->writebuffer(buf, cnt * _page_size, pos * _page_size);
+    fm->write(buf, cnt * _page_size, pos * _page_size);
 }
 
 u32 Page::byte2page(u32 bytes) {

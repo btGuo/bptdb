@@ -8,7 +8,7 @@ namespace bptdb {
  
 class Status {
 public:
-    Status(){}
+    Status() = default;
     Status(const char *err): _err(err){ _ok = false;}
     bool ok() { return _ok; }
     std::string_view getErrmsg() { return _err; }

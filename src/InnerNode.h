@@ -67,7 +67,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        _db->getPageWriter()->write(next_pg);
+        _db->getWriteQueue()->push(next_pg);
     }
 
     bool borrow(DelEntry &entry) {
@@ -86,7 +86,7 @@ public:
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        _db->getPageWriter()->write(next_pg);
+        _db->getWriteQueue()->push(next_pg);
         return true;
     }
 
@@ -127,7 +127,7 @@ public:
             DEBUGOUT("===> innernode split");
             split(hdr, entry);
         }
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         // unlock self.
         lg_tlb.pop_back();
         return Status();
@@ -154,7 +154,7 @@ public:
         DEBUGOUT("===> innernode merge");
         merge(entry);
 done:
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         lg_tlb.pop_back();
     }
 
@@ -166,7 +166,7 @@ done:
         hdr = handleOverFlow(pg, _container.elemSize(newkey, 0));
         _container.updateKeyat(pos, newkey);
 
-        _db->getPageWriter()->write(pg);
+        _db->getWriteQueue()->push(pg);
         lg_tlb.pop_back();
     }
 

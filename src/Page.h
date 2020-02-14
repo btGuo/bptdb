@@ -52,8 +52,6 @@ public:
     tag_declare(lru_tag, Page, _lru_tag); 
 private:
     u32    byte2page(u32 bytes);
-    // only write buffer
-    void _write(FileManager *fm);
     // read by page_size
     void _readPage(FileManager *fm, char *buf, u32 cnt, u32 pos);
     // write by page_size

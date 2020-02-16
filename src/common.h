@@ -25,7 +25,6 @@ using u32 = std::uint32_t;
 using u16 = std::uint16_t;
 using u64 = std::uint64_t;
 using pgid_t = std::uint32_t;
-using comparator_t = std::function<bool(std::string_view, std::string_view)>;
 
 namespace error {
     constexpr const char *keyRepeat = "key already exist";

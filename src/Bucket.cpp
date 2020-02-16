@@ -4,8 +4,8 @@
 
 namespace bptdb {
 
-Status Bucket::get(std::string &key, std::string &val) {
-    return _impl->get(key, val);
+std::tuple<Status, std::string> Bucket::get(std::string &key) {
+    return _impl->get(key);
 }
 
 Status Bucket::update(std::string &key, std::string &val) {
@@ -20,16 +20,16 @@ Status Bucket::del(std::string &key) {
     return _impl->del(key);
 }
 
-Bucket::Bucket(std::string &name, BptreeMeta &meta, DB *db, comparator_t cmp) {
-    _impl = std::make_shared<Bptree>(name, meta, db, cmp);
-}
-
 std::shared_ptr<IteratorBase> Bucket::begin() {
     return _impl->begin();
 }
 
 std::shared_ptr<IteratorBase> Bucket::at(std::string &key) {
     return _impl->at(key);
+}
+
+Bucket::Bucket(std::shared_ptr<Bptree> impl) {
+    _impl = impl;
 }
 
 Bucket::~Bucket() = default;

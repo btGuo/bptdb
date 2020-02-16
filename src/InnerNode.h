@@ -13,7 +13,7 @@ public:
     using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
     using Mutex_t = std::shared_mutex;
 
-    InnerNode(pgid_t id, u32 maxsize, DB *db, 
+    InnerNode(pgid_t id, u32 maxsize, DBImpl *db, 
             NodeMap<InnerNode> *map, comparator_t cmp): 
         Node(id, maxsize, db), _container(cmp), _map(map){}
 
@@ -67,7 +67,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        _db->getWriteQueue()->push(next_pg);
+        next_pg->write(_db->getFileManager());
     }
 
     bool borrow(DelEntry &entry) {
@@ -81,12 +81,13 @@ public:
             return false;
         }
 
+        // diff with leafnode. here we use entry.delim.
         hdr = handleOverFlow(pg, _container.elemSize(
-                next_container.key(0), next_container.val(0)));
+                entry.delim, next_container.val(0)));
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        _db->getWriteQueue()->push(next_pg);
+        next_pg->write(_db->getFileManager());
         return true;
     }
 
@@ -97,7 +98,8 @@ public:
         auto [next_hdr, next_pg] = next->handlePage();
         auto &next_container = next->_container;
 
-        hdr = handleOverFlow(pg, next_hdr->bytes);
+        // diff with leafnode. here we add entry.delim.
+        hdr = handleOverFlow(pg, next_hdr->bytes + entry.delim.size());
 
         _container.mergeFrom(next_container, entry.delim);
         entry.del = true;
@@ -127,7 +129,7 @@ public:
             DEBUGOUT("===> innernode split");
             split(hdr, entry);
         }
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
         // unlock self.
         lg_tlb.pop_back();
         return Status();
@@ -154,7 +156,7 @@ public:
         DEBUGOUT("===> innernode merge");
         merge(entry);
 done:
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
         lg_tlb.pop_back();
     }
 
@@ -166,7 +168,7 @@ done:
         hdr = handleOverFlow(pg, _container.elemSize(newkey, 0));
         _container.updateKeyat(pos, newkey);
 
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
         lg_tlb.pop_back();
     }
 
@@ -175,13 +177,13 @@ done:
     get(std::string &key, UnWLockGuardVec_t &lg_tlb) {
 
         _shmtx.lock();
+        // keep page alive.
         auto [hdr, pg] = handlePage();
+        (void)hdr;
         if(safetoput(hdr)) {
             lg_tlb.clear();
         }
         lg_tlb.emplace_back(_shmtx);
-
-        handlePage();
         return _container.get(key);
     }
 
@@ -191,13 +193,12 @@ done:
         UnWLockGuardVec_t &lg_tlb) {
 
         _shmtx.lock();
+        // keep page alive.
         auto [hdr, pg] = handlePage();
         if(safetodel(hdr)) {
             lg_tlb.clear();
         }
         lg_tlb.emplace_back(_shmtx);
-
-        handlePage();
         return _container.get(key, entry);
     }
 
@@ -209,15 +210,18 @@ done:
         _shmtx.lock_shared();
         par_mtx.unlock_shared();
 
-        handlePage();
+        // keep page alive.
+        auto [hdr, pg] = handlePage();
+        (void)hdr; 
         return _container.get(key);
     }
 
-    // without lock
+    // without lock, only used by iterator.
     std::tuple<pgid_t, u32> 
     get(std::string &key) {
-
-        handlePage();
+        // keep page alive.
+        auto [hdr, pg] = handlePage();
+        (void)hdr; 
         return _container.get(key);
     }
 
@@ -240,6 +244,7 @@ done:
     }
 
     bool empty() {
+        // keep page alive.
         auto [hdr, pg] = handlePage();
         return hdr->size == 0;
     }
@@ -253,7 +258,46 @@ done:
         // free self page
         pg->free(_db->getPageAllocator());
         _db->getPageCache()->del(ret);
+        
         return ret;
+    }
+
+    std::string maxkey() {
+        auto [hdr, pg] = handlePage();
+        return std::string(_container.maxkey());
+    }
+
+    std::string minkey() {
+        auto [hdr, pg] = handlePage();
+        return std::string(_container.minkey());
+    }
+
+    void show() {
+        auto [hdr, pg] = handlePage();
+        std::cout << "size " << hdr->size << "\n";
+        for(auto it = _container.begin(); !it.done(); it.next()) {
+            std::cout << "key " << std::string(it.key()) << "\n";
+        }
+    }
+
+    void debug(u32 height) {
+        auto [hdr, pg] = handlePage();
+        if(height == 2) {
+            return;
+        }
+        pgid_t prev = _container.head(), cur = 0;
+        _map->get(prev)->debug(height - 1);
+        for(auto it = _container.begin(); !it.done(); it.next()) {
+            cur = it.val();
+            _map->get(cur)->debug(height - 1);
+            auto keylower = _map->get(prev)->maxkey();
+            auto keyupper = _map->get(cur)->minkey();
+            if(!(it.key() > keylower &&
+                   it.key() <= keyupper)) {
+                assert(0);
+            }
+            prev = cur;
+        }
     }
 private:
     InnerContainer _container;

@@ -36,6 +36,7 @@ struct PageHeader {
 class PageAllocator;
 
 class Page { 
+    friend class PageAllocator;
 public:
     Page(pgid_t id, u32 page_size, u32 data_pgs);
     Page(pgid_t id, u32 page_size);
@@ -50,6 +51,9 @@ public:
     void   *data() { return _data; }
     pgid_t getId() { return _id; }
     tag_declare(lru_tag, Page, _lru_tag); 
+
+    bool &used() { return _used; }
+
 private:
     u32    byte2page(u32 bytes);
     // read by page_size
@@ -57,6 +61,7 @@ private:
     // write by page_size
     void _writePage(FileManager *fm, char *buf, u32 cnt, u32 pos);
 
+    bool    _used{false};
     pgid_t  _id{0};
     u32     _page_size{0};
     u32     _data_pgs{0}; // page len of _data
@@ -65,7 +70,7 @@ private:
 };
 
 using PagePtr = std::shared_ptr<Page>;
-
+//using PagePtr = Page *;
 }// namespace bptdb
 
 #endif

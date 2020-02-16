@@ -5,9 +5,9 @@
 #include <memory>
 #include <algorithm>
 
-#include "Option.h"
-#include "Status.h"
-#include "Bucket.h"
+#include "bptdb/Option.h"
+#include "bptdb/Status.h"
+#include "bptdb/Bucket.h"
 
 namespace bptdb {
 

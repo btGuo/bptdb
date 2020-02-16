@@ -17,14 +17,14 @@
 #include "PageAllocator.h"
 #include "PageCache.h"
 #include "Page.h"
-#include "DB.h"
+#include "DBImpl.h"
 
 namespace bptdb {
 
 template <typename NodeType>
 class NodeMap {
 public:
-    NodeMap(u32 order, DB *db, comparator_t cmp) {
+    NodeMap(u32 order, DBImpl *db, comparator_t cmp) {
         _db = db;
         _order = order;
         _cmp = cmp;
@@ -46,7 +46,7 @@ public:
     }
 private:
     u32 _order{0};
-    DB *_db{nullptr};
+    DBImpl *_db{nullptr};
     comparator_t _cmp;
     std::mutex _mtx;
     std::unordered_map<pgid_t, 
@@ -69,7 +69,7 @@ struct DelEntry {
 
 class Node {
 public:
-    Node(pgid_t id, u32 maxsize, DB *db) {
+    Node(pgid_t id, u32 maxsize, DBImpl *db) {
         _id      = id;
         _maxsize = maxsize;
         _db      = db;
@@ -97,9 +97,9 @@ protected:
         return (bytes + _db->getPageSize() - 1) / _db->getPageSize();
     }
 
-    pgid_t            _id{0};
-    DB                *_db{nullptr};
-    u32               _maxsize{0};
+    pgid_t _id{0};
+    DBImpl *_db{nullptr};
+    u32    _maxsize{0};
     std::shared_mutex _shmtx;
 };
 

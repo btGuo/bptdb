@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <cstddef>
-#include "../List.h"
+#include "../src/List.h"
 using namespace std;
 
 using namespace bptdb;

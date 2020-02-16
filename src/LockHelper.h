@@ -28,7 +28,7 @@ public:
         (_arr + --_size)->~T();
     }
     void clear() {
-        for(int i = 0; i < _size; i++) {
+        for(u32 i = 0; i < _size; i++) {
             (_arr + i)->~T();
         }
         _size = 0;

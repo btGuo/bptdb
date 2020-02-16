@@ -11,6 +11,7 @@ PagePtr PageCache::get(pgid_t key) {
     if(it == _cache.end())
         return std::shared_ptr<Page>();
     auto pg = it->second;
+    //pg->used() = true;
     _lru.erase(pg.get());
     _lru.push_front(pg.get());
     return pg;
@@ -23,8 +24,11 @@ void PageCache::del(pgid_t key) {
     _page_count--;
     auto it = _cache.find(key);
     assert(it != _cache.end());
-    _lru.erase(it->second.get());
+    auto pg = it->second;
+    //assert(!pg->used());
+    _lru.erase(pg.get());
     _cache.erase(key);
+    //delete pg;
 }
 
 }// namespace bptdb

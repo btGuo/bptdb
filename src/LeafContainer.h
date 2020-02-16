@@ -23,7 +23,7 @@ public:
         friend class LeafContainer;
     public:
         Iterator() = default;
-        Iterator(int pos, LeafContainer *con) {
+        Iterator(u32 pos, LeafContainer *con) {
             _pos = pos;
             _con = con;
         }
@@ -35,18 +35,22 @@ public:
         bool done() {
             return _pos == *(_con->_size);    
         }
-        bool lastElem() {
-            return _pos + 1 == *(_con->_size);
-        }
     private:
         std::string_view key2val(std::string_view key) {
             auto elem = (Elem *)(key.data() - sizeof(Elem));
             return std::string_view(
                 key.data() + elem->keylen, elem->vallen);
         }
-        int           _pos{0};
+        u32           _pos{0};
         LeafContainer *_con{nullptr};
     };
+
+    std::string_view minkey() {
+        return _keys[0];
+    }
+    std::string_view maxkey() {
+        return _keys[_keys.size() - 1];
+    }
 
     // ===============================================
 
@@ -81,6 +85,14 @@ public:
     //================================================
     LeafContainer(comparator_t cmp): _cmp(cmp) {}
     LeafContainer(LeafContainer &other): _cmp(other._cmp) {}
+    ~LeafContainer(){ _keys.clear(); }
+
+    void verify() {
+        return;
+        for(u32 i = 1; i < _keys.size(); i++) {
+            assert(_keys[i] > _keys[i - 1]);
+        }
+    }
 
     void push_back(std::string &&key, std::string &&val) {
         _put(_end, key, val);
@@ -130,6 +142,8 @@ public:
     }
 
     bool del(std::string &key) {
+        verify();
+        assert(*_size == _keys.size());
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
         if(ret == _keys.end() || _cmp(key, *ret)) {

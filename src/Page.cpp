@@ -15,6 +15,7 @@ Page::Page(pgid_t id, u32 page_size) {
 
 Page::Page(pgid_t id, u32 page_size, u32 data_pgs) {
     assert(id > 0);
+    assert(data_pgs > 0);
     _id = id;
     _page_size = page_size;
     _data_pgs = data_pgs;
@@ -61,17 +62,19 @@ void *Page::extend(PageAllocator *pa, u32 extbytes) {
     assert(_data);
     auto hdr = (PageHeader *)_data;
     u32 extpages = byte2page(hdr->bytes + extbytes) - _data_pgs;
-    //std::cout << "extpages " << extpages << "\n";
     _data_pgs += extpages;
 
     // we have not enought space on disk, realloc on disk.
     if(_data_pgs > hdr->realpages) {
+        assert(hdr->realpages >= hdr->hdrpages);
         u32 reslen = hdr->realpages - hdr->hdrpages;
         hdr->realpages += extpages;
         if(hdr->res == 0)
             hdr->res = pa->allocPage(extpages);
-        else 
+        else {
+            assert(reslen > 0);
             hdr->res = pa->reallocPage(hdr->res, reslen, reslen + extpages);
+        }
     }
     // we have not enought space on memory, realloc on memory.
     _data = (char *)std::realloc(_data, _page_size * _data_pgs);

@@ -3,6 +3,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <cassert>
 
 namespace bptdb {
 
@@ -31,14 +32,17 @@ public:
         m_size++;
     }
     void erase(T *elem) {
+        assert(m_size);
         erase(elem2tag(elem));
     }
     T *pop_front() {
+        assert(m_size);
         ListTag *tag = m_head.next;
         erase(m_head.next);
         return tag2elem(tag);
     }
     T *pop_back() {
+        assert(m_size);
         ListTag *tag = m_head.prev;
         erase(m_head.prev);
         return tag2elem(tag);

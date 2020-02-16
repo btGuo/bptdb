@@ -4,8 +4,8 @@
 #include <memory>
 #include <string>
 
-#include "Status.h"
-#include "IteratorBase.h"
+#include "bptdb/Status.h"
+#include "bptdb/IteratorBase.h"
 
 namespace bptdb{
 

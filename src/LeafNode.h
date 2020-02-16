@@ -15,7 +15,7 @@ public:
     //using IterPtr_t = std::shared_ptr<Iter_t>;
     using Mutex_t = std::shared_mutex;
 
-    LeafNode(pgid_t id, u32 maxsize, DB *db, 
+    LeafNode(pgid_t id, u32 maxsize, DBImpl *db, 
              NodeMap<LeafNode> *map, comparator_t cmp): 
         Node(id, maxsize, db), _container(cmp), _map(map) {}
 
@@ -67,7 +67,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        _db->getWriteQueue()->push(next_pg);
+        next_pg->write(_db->getFileManager());
     }
 
     bool borrow(DelEntry &entry) {
@@ -86,7 +86,8 @@ public:
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        _db->getWriteQueue()->push(next_pg);
+        next_pg->write(_db->getFileManager());
+        
         return true;
     }
 
@@ -101,7 +102,8 @@ public:
 
         _container.mergeFrom(next_container, entry.delim);
         entry.del = true;
-
+        
+        assert(hdr->next);
         auto ret = hdr->next;
         // set next
         hdr->next = next_hdr->next;
@@ -128,10 +130,12 @@ public:
 
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
         if(!_container.put(key, val)) {
+            // write here, because the page maybe over flow and change.
+            pg->write(_db->getFileManager());
             return std::make_tuple(true, Status(error::keyRepeat));
         }
 
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
         return std::make_tuple(true, Status());
     }
 
@@ -140,17 +144,20 @@ public:
         std::lock_guard lg(_shmtx);
 
         auto [hdr, pg] = handlePage();
-        //assert(!_container.find(key));
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
 
-        assert(_container.put(key, val));
+        if(!_container.put(key, val)) {
+            // same as tryPut
+            pg->write(_db->getFileManager());
+            return Status(error::keyRepeat);
+        }
         // we need to judge again, because other thread may do this.
         if(ifsplit(hdr)) {
             DEBUGOUT("===> leafnode split");
             // do split
             split(hdr, entry);
         }
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
         return Status();
     }
 
@@ -164,10 +171,10 @@ public:
             return std::make_tuple(false, Status());
         }
         if(!_container.del(key)) {
+            pg->write(_db->getFileManager());
             return std::make_tuple(true, Status(error::keyNotFind));
         }
-        _db->getWriteQueue()->push(pg);
-        std::cout << "trydel\n";
+        pg->write(_db->getFileManager());
         return std::make_tuple(true, Status());
     }
 
@@ -176,7 +183,9 @@ public:
         std::lock_guard lg(_shmtx);
         auto [hdr, pg] = handlePage();
 
-        assert(_container.del(key));
+        if(!_container.del(key)) {
+            return Status(error::keyNotFind);
+        }
         // judge again 
         if(!ifmerge(hdr) || entry.last || !hdr->next) {
             goto done;
@@ -188,7 +197,8 @@ public:
         DEBUGOUT("===> leafnode merge");
         merge(entry);
 done:
-        _db->getWriteQueue()->push(pg);
+        pg->write(_db->getFileManager());
+            
         return Status(); 
     }
 
@@ -199,7 +209,9 @@ done:
         std::shared_lock lg(_shmtx);
         par_mtx.unlock_shared();
 
-        handlePage();
+        // keep page alive.
+        auto [hdr, pg] = handlePage();
+        (void)hdr;
         if(!_container.get(key, val)) {
             return Status(error::keyNotFind);
         }
@@ -217,10 +229,10 @@ done:
         hdr = handleOverFlow(pg, _container.elemSize(key, val));
 
         if(!_container.update(key, val)) {
+            pg->write(_db->getFileManager());
             return Status(error::keyNotFind);
         }
-        _db->getWriteQueue()->push(pg);
-
+        pg->write(_db->getFileManager());
         return Status();
     }
 
@@ -228,11 +240,15 @@ done:
     // =====================================================
 
     std::tuple<Iter_t, PagePtr> begin() {
+        // keep page alive.
         auto [hdr, pg] = handlePage();
+        (void)hdr;
         return std::make_tuple(_container.begin(), pg);
     }
     std::tuple<Iter_t, PagePtr> at(std::string &key) {
+        // keep page alive.
         auto [hdr, pg] = handlePage();
+        (void)hdr;
         return std::make_tuple(_container.at(key), pg);
     }
 
@@ -244,8 +260,9 @@ done:
         PageHeader::init(hdr, 1, 0);
         pg.write(fm);
     }
-    // !!!without lock
+    // !!!without lock, only used by iterator.
     LeafNode *next() {
+        // keep page alive.
         auto [hdr, pg] = handlePage();
         if(hdr->next == 0) {
             return nullptr;

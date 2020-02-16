@@ -31,6 +31,38 @@ public:
         return *_head;
     }
 
+    class Iterator {
+        friend class InnerContainer;
+    public:
+        Iterator() = default;
+        Iterator(u32 pos, InnerContainer *con) {
+            _pos = pos;
+            _con = con;
+        }
+        void next() {
+            _pos++;
+        }
+        std::string_view key() { return _con->_keys[_pos]; }
+        pgid_t val() { return _con->key2val(key());  }
+        bool done() {
+            return _pos == *(_con->_size);    
+        }
+    private:
+        u32           _pos{0};
+        InnerContainer *_con{nullptr};
+    };
+
+    Iterator begin() {
+        return Iterator(0, this);
+    }
+
+    std::string_view minkey() {
+        return _keys[0];
+    }
+    std::string_view maxkey() {
+        return _keys[_keys.size() - 1];
+    }
+
     // =======================================
     //
     std::string key(u32 pos) {
@@ -45,10 +77,18 @@ public:
         return elem->val;
     }
 
+    void verify() {
+        return;
+        for(u32 i = 1; i < _keys.size(); i++) {
+            assert(_keys[i] > _keys[i - 1]);
+        }
+    }
+
     // =======================================
     InnerContainer() = default;
     InnerContainer(comparator_t cmp): _cmp(cmp){}
     InnerContainer(InnerContainer &other): _cmp(other._cmp){}
+    ~InnerContainer(){ _keys.clear(); }
 
     // init an InnerContainer we must have a key and two child.
     void init(std::string &key, pgid_t child1, pgid_t child2) {
@@ -69,17 +109,23 @@ public:
 
     // delete elem at pos.
     void delat(u32 pos) {
+        verify();
         assert(pos < *_size);
         _del(const_cast<char *>(_keys[pos].data() - sizeof(Elem)));
     }
 
     // update key at pos
     void updateKeyat(u32 pos, std::string &newkey) {
+        verify();
         assert(pos < *_size);
         _updateKey(const_cast<char *>(_keys[pos].data() - sizeof(Elem)), newkey);
     }
 
     std::tuple<pgid_t, u32> get(std::string &key) {
+        verify();
+        for(u32 i = 1; i < _keys.size(); i++) {
+            assert(_keys[i] > _keys[i - 1]);
+        }
         // 这里upper_bound
         auto ret = std::upper_bound(
             _keys.begin(), _keys.end(), key, _cmp);
@@ -92,6 +138,8 @@ public:
     }
     std::tuple<pgid_t, u32> get(std::string &key, 
                                 DelEntry &entry) {
+
+        verify();
 
         auto ret = std::upper_bound(
             _keys.begin(), _keys.end(), key, _cmp);
@@ -137,6 +185,7 @@ public:
         return ret;
     }
     void mergeFrom(InnerContainer &other, std::string &str) {
+        verify();
         push_back(str, *other._head);
         *_size += *other._size;
         u32 bytes = other._end - other._data;
@@ -147,6 +196,7 @@ public:
     }
     std::string borrowFrom(InnerContainer &other, std::string delim) {
         auto ret = std::string(other._keys[0]);
+        //assert(ret >= delim);
         push_back(delim, *other._head);
         *other._head = other.val(0);
         other.pop_front();

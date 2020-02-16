@@ -10,7 +10,7 @@
 #include "LeafNode.h"
 #include "InnerNode.h"
 #include "LockHelper.h"
-#include "DB.h"
+#include "DBImpl.h"
 #include "IteratorBase.h"
 
 namespace bptdb {
@@ -70,7 +70,7 @@ public:
     }
     // ====================================================
 
-    Bptree(std::string name, BptreeMeta meta, DB *db, comparator_t cmp):
+    Bptree(std::string name, BptreeMeta meta, DBImpl *db, comparator_t cmp):
     _leaf_map(meta.order, db, cmp), _inner_map(meta.order, db, cmp){
         _name   = name;
         _order  = meta.order;
@@ -87,10 +87,12 @@ public:
 
     //====================================================================
 
-    Status get(std::string &key, std::string &val) {
+    std::tuple<Status, std::string> get(std::string &key) {
         _root_mtx.lock_shared();
         auto [nodeid, mutex] = down(_height, _root, key, _root_mtx);
-        return _leaf_map.get(nodeid)->get(key, val, mutex);
+        std::string val;
+        auto stat = _leaf_map.get(nodeid)->get(key, val, mutex);
+        return std::make_tuple(stat, val);
     }
 
     Status update(std::string &key, std::string &val) {
@@ -242,6 +244,7 @@ private:
         }
         auto node = _inner_map.get(nodeid);
         auto [id, pos] = node->get(key, par_mtx);
+        (void)pos;
         if(height == 2) {
             return std::forward_as_tuple(id, node->getMutex());
         }
@@ -254,6 +257,7 @@ private:
         }
         auto node = _inner_map.get(nodeid);
         auto [id, pos] = node->get(key);
+        (void)pos;
         if(height == 2) {
             return id;
         }
@@ -264,13 +268,19 @@ private:
         return _root_mtx;
     }
 
+    void debug() {
+        if(_height > 1) {
+            _inner_map.get(_root)->debug(_height);
+        }
+    }
+
     u32           _order{0};
     u32           _height{0};
     pgid_t        _root{0};
     pgid_t        _first{0};
     std::string   _name;
     comparator_t  _cmp;
-    DB            *_db{nullptr};
+    DBImpl            *_db{nullptr};
     std::shared_mutex  _root_mtx;
     NodeMap <LeafNode>  _leaf_map;
     NodeMap <InnerNode> _inner_map;

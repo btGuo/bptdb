@@ -192,51 +192,65 @@ value长度: 50 - 100 byte
 cpu硬件信息
 
 ```
-CPU: 架构：             x86_64
-CPU 运行模式：     32-bit, 64-bit
-字节序：        		 	Little Endian
-CPU:             			   8
-在线 CPU 列表：    0-7
+架构：           x86_64
+CPU运行模式：    32-bit, 64-bit
+字节序：         Little Endian
+CPU:             8
+在线CPU列表：    0-7
 每个核的线程数： 2
-每个座的核数：   	4
-座：           				 1
-NUMA 节点：      	 1
-厂商 ID：        		    GenuineIntel
-CPU 系列：       	    6
-型号：           			  94
-型号名称：              Intel(R) Core(TM) i7-6700HQ CPU @ 2.60GHz
-步进：           			  3
-CPU MHz：        	 2910.739
-CPU 最大 MHz：   3500.0000
-CPU 最小 MHz：   800.0000
-BogoMIPS：       	5199.98
-虚拟化：         	   	   VT-x
-L1d 缓存：       		  32K
-L1i 缓存：              	32K
-L2 缓存：        			256K
-L3 缓存：        		    6144K
-NUMA 节点0 CPU: 0-7
+每个座的核数：   4
+座：             1
+NUMA节点：       1
+厂商ID：         GenuineIntel
+CPU系列：        6
+型号：           94
+型号名称：       Intel(R) Core(TM) i7-6700HQ CPU @ 2.60GHz
+步进：           3
+CPUMHz：         2910.739
+CPU最大          MHz：   3500.0000
+CPU最小          MHz：   800.0000
+BogoMIPS：       5199.98
+虚拟化：         VT-x
+L1d缓存：        32K
+L1i缓存：        32K
+L2缓存：         256K
+L3缓存：         6144K
+NUMA节点0CPU:    0-7
 ```
 
 硬盘信息
 
 ```
-Model Family:     HGST Travelstar 7K1000                                                                                  Device Model:     HGST HTS721010A9E630                                                                                Serial Number:    JR10004M2GV4JF                                                                                            LU WWN Device Id: 5 000cca 8a8e2ee5a                                                                                    Firmware Version: JB0OA3J0                                                                                                          User Capacity:    1,000,204,886,016 bytes [1.00 TB]                                                              Sector Sizes:     512 bytes logical, 4096 bytes physical                                                        Rotation Rate:    7200 rpm                                                                                                                Form Factor:      2.5 inches                                                                                                               Device is:        In smartctl database [for details use: -P show]                                            ATA Version is:   ATA8-ACS T13/1699-D revision 6                                                                 SATA Version is:  SATA 3.0, 6.0 Gb/s (current: 6.0 Gb/s)                                                        Local Time is:    Sun Feb 16 22:29:49 2020 CST                                                                       SMART support is: Available - device has SMART capability.                                            SMART support is: Enabled      
+Model Family:     HGST Travelstar 7K1000
+Device Model:     HGST HTS721010A9E630
+Serial Number:    JR10004M2GV4JF
+LU WWN Device Id: 5 000cca 8a8e2ee5a
+Firmware Version: JB0OA3J0
+User Capacity:    1,000,204,886,016 bytes [1.00 TB]
+Sector Sizes:     512 bytes logical, 4096 bytes physical
+Rotation Rate:    7200 rpm
+Form Factor:      2.5 inches
+Device is:        In smartctl database [for details use: -P show]
+ATA Version is:   ATA8-ACS T13/1699-D revision 6
+SATA Version is:  SATA 3.0, 6.0 Gb/s (current: 6.0 Gb/s)
+Local Time is:    Sun Feb 16 22:29:49 2020 CST
+SMART support is: Available - device has SMART capability.                                            
+SMART support is: Enabled      
 ```
 
-随机写入(微妙每操作)
+随机写入(微秒每操作)
 
 ```
 12.1687 micro/op
 ```
 
-随机读取(微妙每操作)
+随机读取(微秒每操作)
 
 ```
 6.64167 micro/op
 ```
 
-顺序读取(微妙每操作)
+顺序读取(微秒每操作)
 
 ```
 0.148999 micro/op

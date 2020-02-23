@@ -90,14 +90,14 @@ void iter(vector<pair<string, string>> &kvs, bptdb::Bucket bucket) {
 
 int main(int argc, char **argv) {
 
-    if(argc < 4) {
-        cout << "usage: " << argv[0] << " [option] [size] [multithread](y/n)\n";
+    if(argc < 3) {
+        cout << "usage: " << argv[0] << " [option] [size]\n";
         cout << "\toption: [1]put, [2]delete, [3]get, [4]getbyiter\n";
         return 0;
     }
     int option = std::atoi(argv[1]);
     int size   = std::atoi(argv[2]);
-    bool multi = argv[3][0] == 'y' ? true : false;
+    bool multi = false;
 
     // open database and get bucket.
     bptdb::DB db;

@@ -21,6 +21,18 @@ sudo make install
 
 ## 使用文档
 
+#### 包含头文件
+
+```
+#include <bptdb/DB.h>
+```
+
+#### 编译链接选项
+
+```
+-std=c++17 -lbptdb -lpthread
+```
+
 #### 打开数据库
 
 ```
@@ -106,11 +118,11 @@ auto stat = bucket.update(key, newval);
 assert(stat.ok());
 ```
 
-以上bucket的四个操作put, get, del, update均是线程安全的。
+**以上bucket的四个操作put, get, del, update均是线程安全的。**
 
 #### 迭代器
 
-**注意: 迭代器是只读的，并且非线程安全。
+**注意: 迭代器是只读的，并且非线程安全。**
 
 检查迭代器是否遍历完。
 
@@ -256,3 +268,4 @@ SMART support is: Enabled
 0.148999 micro/op
 ```
 
+测试文件位于bench下，可用general_data.cpp生成数据，之后编译bptdb.cpp即可进行测试。

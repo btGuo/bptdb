@@ -57,7 +57,7 @@ Status DBImpl::open(std::string path, bool creat, Option option) {
     _fm = std::make_shared<FileManager>(_path, option.sync);
     // read meta
     _fm->read((char *)&_meta, sizeof(Meta), 0);
-    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages, _fm.get());
+    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     _pa = std::make_unique<PageAllocator>(_meta.freelist_id, 
                                           _fm.get(), _meta.page_size);
     _buckets = std::make_shared<Bptree>(
@@ -102,7 +102,7 @@ void DBImpl::init(Option option) {
                              _meta.page_size, _meta.freelist_id + 2);
 
     // create basic utils
-    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages, _fm.get());
+    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     _pa = std::make_unique<PageAllocator>(_meta.freelist_id, _fm.get(), 
                                           _meta.page_size);
 

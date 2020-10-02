@@ -41,5 +41,8 @@ struct BptreeMeta {
     u32 order;
 };
 
+u32 calculate_CRC32(void *pStart, u32 uSize);
+
+
 }// namespace bptdb
 #endif

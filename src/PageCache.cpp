@@ -1,5 +1,6 @@
 #include <c++/8/bits/c++config.h>
 #include <functional>
+#include <future>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -10,7 +11,6 @@
 #include <chrono>
 #include "Page.h"
 #include "PageCache.h"
-#include "ThreadPool.h"
 
 namespace bptdb {
 
@@ -21,19 +21,19 @@ PageCache::PageCache(u32 max_page): _lru(Page::lru_tag()) {
 }
 
 void PageCache::start() {
-    std::thread th(PageCache::run);
-    th.detach();
+    _f = std::async(std::launch::async, PageCache::run);
 }
 
 void PageCache::stop() {
     _stop.store(true);
+    _f.get();
 }
 
 PagePtr PageCache::tryGet(pgid_t id) {
     std::shared_lock lg(_shmtx);
     auto it = _cache.find(id);
     if (it == _cache.end()) {
-        return std::make_shared<Page>(id);
+        return std::shared_ptr<Page>();
     }
     auto pg = it->second;
     _lru.erase(pg.get());
@@ -49,6 +49,7 @@ PagePtr PageCache::insertNew(pgid_t id) {
         auto pg = _lru.pop_back();
         _cache.erase(pg->getId());
         _page_count--;
+        pg->flush();
     }
     _cache.insert({pg->getId(), pg});
     _lru.push_front(pg.get());
@@ -76,14 +77,23 @@ bool PageCache::alive() {
 }
 
 void PageCache::run() {
+    DEBUGOUT("PageCache start...");
     auto pc = g_pc;
-    while(pc->alive()) {
+    while (pc->alive()) {
         auto dirty_pgs = pc->collectDirty();
         for (std::size_t i = 0; i < dirty_pgs.size(); i++) {
             dirty_pgs[i]->flush();
         }
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        if (!pc->alive()) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
+    auto dirty_pgs = pc->collectDirty();
+    for (std::size_t i = 0; i < dirty_pgs.size(); i++) {
+        dirty_pgs[i]->flush();
+    }
+    DEBUGOUT("PageCache stop...");
 }
 
 std::vector<PagePtr> PageCache::collectDirty() {

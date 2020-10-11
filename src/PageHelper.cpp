@@ -20,7 +20,6 @@ PageHelper::PageHelper(pgid_t id, u32 data_pgs) {
     _id = id;
     _data_pgs = data_pgs;
     _data = (char *)std::malloc(g_option.page_size * _data_pgs);
-    //memset(_data, 0, g_option.page_size * _data_pgs);
 }
 
 PageHelper::~PageHelper() {

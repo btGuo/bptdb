@@ -5,9 +5,9 @@
 #include <memory>
 #include <algorithm>
 
-#include "bptdb/Option.h"
-#include "bptdb/Status.h"
-#include "bptdb/Bucket.h"
+#include "Option.h"
+#include "Status.h"
+#include "Bucket.h"
 
 namespace bptdb {
 
@@ -18,6 +18,7 @@ constexpr bool DB_CREATE = true;
 class DB {
 public:
     DB();
+    ~DB();
     Status open(std::string path, bool creat = false, Option option = Option());
 
     Status create(std::string path, Option option = Option());
@@ -28,7 +29,7 @@ public:
     std::tuple<Status, Bucket>
     getBucket(std::string name, comparator_t cmp = std::less<std::string_view>());
 private:
-    std::shared_ptr<DBImpl> _impl;
+    DBImpl *_impl{nullptr};
 };
 
 }

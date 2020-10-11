@@ -135,7 +135,7 @@ public:
         InnerNode::newOnDisk(_root, entry.key, prev, entry.val);
 
         _height++;
-        _db->updateRoot(_name, _root, _height);
+        g_db->updateRoot(_name, _root, _height);
         return stat;
     }
 
@@ -173,7 +173,7 @@ public:
                 auto old = _root;
                 _root = root->tochild();
                 _height--;
-                _db->updateRoot(_name, _root, _height);
+                g_db->updateRoot(_name, _root, _height);
                 // delete the prev root
                 _inner_map.del(old);
             }
@@ -277,7 +277,6 @@ private:
     pgid_t        _first{0};
     std::string   _name;
     comparator_t  _cmp;
-    DBImpl            *_db{nullptr};
     std::shared_mutex  _root_mtx;
     NodeMap <LeafNode>  _leaf_map;
     NodeMap <InnerNode> _inner_map;

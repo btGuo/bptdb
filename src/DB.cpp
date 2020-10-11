@@ -15,11 +15,19 @@
 #include "Bptree.h"
 
 namespace bptdb {
-
-std::unique_ptr<DBImpl> g_db;
+DBImpl *g_db;
 
 DB::DB() {
-    _impl = std::make_shared<DBImpl>();
+    static DBImpl dbimpl;
+    _impl = &dbimpl;
+    g_db = &dbimpl;
+}
+
+DB::~DB() {
+    g_pc->stop();
+    g_pc.reset();
+    g_pa.reset();
+    g_fm.reset();    
 }
 
 Status DB::open(std::string path, bool creat, Option option) {
@@ -41,6 +49,7 @@ DB::getBucket(std::string name, comparator_t cmp) {
 }
 
 Status DBImpl::open(std::string path, bool creat, Option option) {
+    // FIXME check meta if file exist
     g_option = option;
     // test file
     std::fstream file(path, std::ios::in);
@@ -62,12 +71,14 @@ Status DBImpl::open(std::string path, bool creat, Option option) {
     // read meta
     g_fm->read((char *)&_meta, sizeof(Meta), 0);
     g_pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
+    g_pc->start();
     g_pa = std::make_unique<PageAllocator>(_meta.freelist_id);
     _buckets = std::make_shared<Bptree>(
         "__BUCKET_TREE__", _meta.bucket_tree_meta, std::less<std::string_view>());
 
     return Status();
 }
+
 Status DBImpl::create(std::string path, Option option) {
 
     g_option = option;
@@ -98,14 +109,14 @@ void DBImpl::init(Option option) {
 
     // create filemanager firstly
     g_fm = std::make_unique<FileManager>(_path, option.sync);
-
     // write meta
     g_fm->write((char *)&_meta, sizeof(_meta), 0);
+    // create pagecache 
+    g_pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
+    g_pc->start();
+
     // init pageAllocator on disk
     PageAllocator::newOnDisk(_meta.freelist_id, _meta.freelist_id + 2);
-
-    // create basic utils
-    g_pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
     g_pa = std::make_unique<PageAllocator>(_meta.freelist_id);
 
     auto meta = _meta.bucket_tree_meta;
@@ -169,8 +180,5 @@ void DBImpl::updateRoot(std::string &name, pgid_t newroot, u32 height) {
     assert(stat.ok());
 }
 
-void DBImpl::show() {
-    g_pa->show();
-}
 }// namespace bptdb
 

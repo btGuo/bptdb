@@ -33,6 +33,10 @@ struct PageHeader {
         hdr->size      = 0;
         hdr->next      = next;
     }
+    
+    void show() {
+        DEBUGOUT("hdrpages %d, bytes %d, realpages %d", hdrpages, bytes, realpages);
+    }
 };
 
 class Page {
@@ -48,7 +52,7 @@ public:
         std::shared_lock lg(_shmtx);
         if (!_data) {
             _data = std::malloc(g_option.page_size);
-            g_fm->read((char*)_data, 1, _id * g_option.page_size);
+            g_fm->read((char*)_data, g_option.page_size, _id * g_option.page_size);
         }
         std::memcpy(dest, _data, g_option.page_size); 
     }
@@ -66,7 +70,7 @@ public:
             return;
         }
         if (_data) {
-            g_fm->write((char*)_data, 1, _id * g_option.page_size);
+            g_fm->write((char*)_data, g_option.page_size, _id * g_option.page_size);
         }
         _dirty.store(false);
     }

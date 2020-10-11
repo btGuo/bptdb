@@ -1,6 +1,7 @@
 #ifndef __LIST_H
 #define __LIST_H
 
+#include <mutex>
 #include <type_traits>
 #include <utility>
 #include <cassert>
@@ -24,33 +25,40 @@ class List {
 public:
     List(std::size_t off): m_off(off) {}
     void push_back(T *elem) {
+        std::unique_lock lg(m_mtx);
         add(elem2tag(elem), m_head.prev, &m_head);
         m_size++;
     }
     void push_front(T *elem) {
+        std::unique_lock lg(m_mtx);
         add(elem2tag(elem), &m_head, m_head.next);
         m_size++;
     }
     void erase(T *elem) {
+        std::unique_lock lg(m_mtx);
         assert(m_size);
         erase(elem2tag(elem));
     }
     T *pop_front() {
+        std::unique_lock lg(m_mtx);
         assert(m_size);
         ListTag *tag = m_head.next;
         erase(m_head.next);
         return tag2elem(tag);
     }
     T *pop_back() {
+        std::unique_lock lg(m_mtx);
         assert(m_size);
         ListTag *tag = m_head.prev;
         erase(m_head.prev);
         return tag2elem(tag);
     }
     bool empty() {
+        std::unique_lock lg(m_mtx);
         return m_size == 0;
     }
     std::size_t size() {
+        std::unique_lock lg(m_mtx);
         return m_size;
     }
 private:
@@ -74,6 +82,7 @@ private:
     ListTag m_head;
     std::size_t m_size{0};
     std::size_t m_off{0};
+    std::mutex  m_mtx;
 };
 
 }// namespace bptdb

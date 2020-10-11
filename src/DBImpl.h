@@ -30,7 +30,6 @@ public:
         u32 checksum;
     };
     ~DBImpl() {
-        show();
     }
     Status open(std::string path, bool creat, Option option);
     Status create(std::string path, Option option);
@@ -42,18 +41,16 @@ public:
     getBucket(std::string name, comparator_t cmp);
 
     void updateRoot(std::string &name, pgid_t newroot, u32 height);
-    void show();
 
 private:
     void init(Option option);
-    void startWriteThread();
 
     std::shared_ptr<Bptree>        _buckets;
     std::string                    _path;
     Meta                           _meta;
 };
 
-extern std::unique_ptr<DBImpl> g_db;
+extern DBImpl *g_db;
 
 }// namespace bptdb
 

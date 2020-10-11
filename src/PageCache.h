@@ -6,6 +6,7 @@
 #include <cassert>
 #include <functional>
 #include <mutex>
+#include <future>
 #include <map>
 #include <memory>
 #include <list>
@@ -13,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "FileManager.h"
 #include "common.h"
 #include "List.h"
 #include "Page.h"
@@ -39,6 +39,7 @@ private:
     std::map<pgid_t, PagePtr> _cache;
     std::shared_mutex _shmtx;
     std::atomic_bool _stop{false};
+    std::future<void> _f;
     List<Page> _lru; // 侵入式链表，并不拥有Page所有权
 };
 

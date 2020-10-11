@@ -47,7 +47,7 @@ public:
         bool _done{false};
         LeafNode *node{nullptr};
         Iter_t it;
-        PagePtr pg;
+        PageHelperPtr pg;
     };
 
     // ====================================================
@@ -70,19 +70,18 @@ public:
     }
     // ====================================================
 
-    Bptree(std::string name, BptreeMeta meta, DBImpl *db, comparator_t cmp):
-    _leaf_map(meta.order, db, cmp), _inner_map(meta.order, db, cmp){
+    Bptree(std::string name, BptreeMeta meta, comparator_t cmp):
+    _leaf_map(meta.order, cmp), _inner_map(meta.order, cmp){
         _name   = name;
         _order  = meta.order;
         _height = meta.height;
         _root   = meta.root;
         _first  = meta.first;
-        _db     = db;
         _cmp    = cmp;
     }
 
-    static void newOnDisk(pgid_t id, FileManager *fm, u32 page_size) {
-        LeafNode::newOnDisk(id, fm, page_size);
+    static void newOnDisk(pgid_t id) {
+        LeafNode::newOnDisk(id);
     }
 
     //====================================================================
@@ -131,11 +130,9 @@ public:
 
         // must be locked here.
         auto prev = _root;
-        _root = _db->getPageAllocator()->allocPage(1);
+        _root = g_pa->allocPage(1);
         //std::cout << "root " << prev << " change to " << _root << "\n";
-        InnerNode::newOnDisk(_root,
-                _db->getFileManager(), _db->getPageSize(),
-                entry.key, prev, entry.val);
+        InnerNode::newOnDisk(_root, entry.key, prev, entry.val);
 
         _height++;
         _db->updateRoot(_name, _root, _height);

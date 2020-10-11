@@ -3,25 +3,23 @@
 #include <memory>
 #include "PageAllocator.h"
 #include "DB.h"
-#include "Page.h"
 #include "PageCache.h"
 
 namespace bptdb {
 
-void PageAllocator::newOnDisk(pgid_t root, FileManager *fm, 
-        u32 page_size, u32 start_pos) {
-    Page pg(root, page_size, 1);
+std::unique_ptr<PageAllocator> g_pa;
+
+void PageAllocator::newOnDisk(pgid_t root, u32 start_pos) {
+    PageHelper pg(root, 1);
     auto hdr = (PageHeader *)pg.data();
     PageHeader::init(hdr, 1, start_pos);
-    pg.write(fm);
+    pg.write();
 }
 
-PageAllocator::PageAllocator(pgid_t root, FileManager *fm, u32 page_size) {
-    _page_size = page_size;
+PageAllocator::PageAllocator(pgid_t root) {
     _root = root;
-    _fm = fm;
-    _pg = std::make_unique<Page>(_root, page_size);
-    _pg->read(fm);
+    _pg = std::make_unique<PageHelper>(_root);
+    _pg->read();
 }
 
 pgid_t PageAllocator::allocPage(u32 len) {
@@ -36,7 +34,7 @@ pgid_t PageAllocator::allocPage(u32 len) {
     if(it == end) {
         auto ret = hdr->next;
         hdr->next += len;
-        _pg->write(_fm);
+        _pg->write();
         return ret;
     }
     auto ret = it->pos;
@@ -48,7 +46,7 @@ pgid_t PageAllocator::allocPage(u32 len) {
         it->len -= len;
         it->pos += len;
     }
-    _pg->write(_fm);
+    _pg->write();
     return ret;
 }
 
@@ -108,7 +106,7 @@ void PageAllocator::freePage(pgid_t pos, u32 len) {
             freePage(_tmp.pos, _tmp.len);
         }
     }
-    _pg->write(_fm);
+    _pg->write();
 }
 
 pgid_t PageAllocator::reallocPage(pgid_t pos, u32 len, u32 newlen) {
@@ -147,8 +145,8 @@ void *PageAllocator::extendPage(u32 extbytes) {
         }
     }
     // we have not enought space on memory, realloc on memory.
-    _pg->_data = (char *)std::realloc(_pg->_data, 
-                                      _pg->_page_size * _pg->_data_pgs);
+    _pg->_data = (char *)std::realloc(
+            _pg->_data, g_option.page_size * _pg->_data_pgs);
     return _pg->_data;
 }
 

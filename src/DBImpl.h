@@ -44,29 +44,16 @@ public:
     void updateRoot(std::string &name, pgid_t newroot, u32 height);
     void show();
 
-    FileManager *getFileManager() {
-        return _fm.get();
-    }
-    PageAllocator *getPageAllocator() {
-        return _pa.get();
-    }
-    PageCache *getPageCache() {
-        return _pc.get();
-    }
-    u32 getPageSize() {
-        return _meta.page_size;
-    }
 private:
     void init(Option option);
     void startWriteThread();
 
     std::shared_ptr<Bptree>        _buckets;
-    std::shared_ptr<FileManager>   _fm;
-    std::unique_ptr<PageAllocator> _pa;
-    std::unique_ptr<PageCache>     _pc;
     std::string                    _path;
     Meta                           _meta;
 };
+
+extern std::unique_ptr<DBImpl> g_db;
 
 }// namespace bptdb
 

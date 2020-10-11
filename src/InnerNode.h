@@ -4,6 +4,7 @@
 #include "Node.h"
 #include "InnerContainer.h"
 #include "LockHelper.h"
+#include "PageHelper.h"
 
 namespace bptdb {
 
@@ -13,9 +14,9 @@ public:
     using UnWLockGuardVec_t = UnLockGuardArray<UnWriteLockGuard>;
     using Mutex_t = std::shared_mutex;
 
-    InnerNode(pgid_t id, u32 maxsize, DBImpl *db, 
+    InnerNode(pgid_t id, u32 maxsize, 
             NodeMap<InnerNode> *map, comparator_t cmp): 
-        Node(id, maxsize, db), _container(cmp), _map(map){}
+        Node(id, maxsize), _container(cmp), _map(map){}
 
     // ==================================================================
 
@@ -23,27 +24,18 @@ public:
         con.reset(&hdr->bytes, &hdr->size, (char *)(hdr + 1));
     }
 
-    std::tuple<PageHeader *, PagePtr> 
+    std::tuple<PageHeader *, PageHelperPtr> 
     handlePage() {
-        PageHeader *hdr = nullptr;
-        PagePtr pg = _db->getPageCache()->get(_id);
-        if(!pg) {
-            pg = _db->getPageCache()->alloc(_id, _db->getPageSize());
-            //_db->getPageCache()->put(pg);
-            hdr = (PageHeader *)pg->read(_db->getFileManager());
-            containerReset(hdr, _container);
-        }else {
-            hdr = (PageHeader *)pg->data();
-            if(_container.raw()) {
-                containerReset(hdr, _container);
-            }
-        }
+        auto pg = std::make_shared<PageHelper>(_id);
+        pg->read();
+        PageHeader *hdr = (PageHeader *)pg->data();
+        containerReset(hdr, _container);
         return std::make_tuple(hdr, pg);
     }
 
-    PageHeader *handleOverFlow(PagePtr pg, u32 extbytes) {
+    PageHeader *handleOverFlow(PageHelperPtr pg, u32 extbytes) {
         if(pg->overFlow(extbytes)) {
-            pg->extend(_db->getPageAllocator(), extbytes);
+            pg->extend(extbytes);
             containerReset((PageHeader*)pg->data(), _container);
         }
         return (PageHeader *)pg->data();
@@ -52,9 +44,8 @@ public:
     void split(PageHeader *hdr, PutEntry &entry) {
 
         u32 len = byte2page(hdr->bytes);
-        auto next_pg = _db->getPageCache()->alloc(
-            _db->getPageAllocator()->allocPage(len),
-            _db->getPageSize(), len);
+        auto next_pg = std::make_shared<PageHelper>(
+                g_pa->allocPage(len), len);
         auto next_hdr = (PageHeader *)next_pg->data();
 
         PageHeader::init(next_hdr, len, hdr->next); 
@@ -67,7 +58,7 @@ public:
         entry.key = _container.splitTo(next_container);
         entry.update = true;
         
-        next_pg->write(_db->getFileManager());
+        next_pg->write();
     }
 
     bool borrow(DelEntry &entry) {
@@ -87,7 +78,7 @@ public:
 
         entry.key = _container.borrowFrom(next_container, entry.delim);
         entry.update = true;
-        next_pg->write(_db->getFileManager());
+        next_pg->write();
         return true;
     }
 
@@ -108,9 +99,9 @@ public:
         // set next
         hdr->next = next_hdr->next;
         // 1. free page buffer on memory and page id on disk
-        next_pg->free(_db->getPageAllocator());
+        next_pg->free();
         // 2. del page at cache
-        _db->getPageCache()->del(ret);
+        // _db->getPageCache()->del(ret);
         // 3. del node on map
         _map->del(ret);
     }
@@ -129,7 +120,7 @@ public:
             DEBUGOUT("===> innernode split");
             split(hdr, entry);
         }
-        pg->write(_db->getFileManager());
+        pg->write();
         // unlock self.
         lg_tlb.pop_back();
         return Status();
@@ -156,7 +147,7 @@ public:
         DEBUGOUT("===> innernode merge");
         merge(entry);
 done:
-        pg->write(_db->getFileManager());
+        pg->write();
         lg_tlb.pop_back();
     }
 
@@ -168,7 +159,7 @@ done:
         hdr = handleOverFlow(pg, _container.elemSize(newkey, 0));
         _container.updateKeyat(pos, newkey);
 
-        pg->write(_db->getFileManager());
+        pg->write();
         lg_tlb.pop_back();
     }
 
@@ -228,10 +219,10 @@ done:
     //==================================================
 
     static void newOnDisk(
-        pgid_t id, FileManager *fm, u32 page_size, 
-        std::string &key, pgid_t child1, pgid_t child2) {
+        pgid_t id, std::string &key, 
+        pgid_t child1, pgid_t child2) {
 
-        Page pg(id, page_size, 1);
+        PageHelper pg(id, 1);
         auto hdr = (PageHeader *)pg.data();
         PageHeader::init(hdr, 1, 0);
 
@@ -240,7 +231,7 @@ done:
         containerReset(hdr, con);
         con.init(key, child1, child2);
 
-        pg.write(fm);
+        pg.write();
     }
 
     bool empty() {
@@ -256,8 +247,8 @@ done:
         assert(hdr->next == 0);
         auto ret =  _container.head();
         // free self page
-        pg->free(_db->getPageAllocator());
-        _db->getPageCache()->del(ret);
+        pg->free();
+        // _db->getPageCache()->del(ret);
         
         return ret;
     }

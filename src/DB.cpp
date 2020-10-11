@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <string_view>
 #include <algorithm>
 #include <cstdlib>
@@ -14,6 +15,8 @@
 #include "Bptree.h"
 
 namespace bptdb {
+
+std::unique_ptr<DBImpl> g_db;
 
 DB::DB() {
     _impl = std::make_shared<DBImpl>();
@@ -38,6 +41,7 @@ DB::getBucket(std::string name, comparator_t cmp) {
 }
 
 Status DBImpl::open(std::string path, bool creat, Option option) {
+    g_option = option;
     // test file
     std::fstream file(path, std::ios::in);
     // file is not exist
@@ -54,19 +58,19 @@ Status DBImpl::open(std::string path, bool creat, Option option) {
     // database exist
     // init member data
     _path = path;
-    _fm = std::make_shared<FileManager>(_path, option.sync);
+    g_fm = std::make_unique<FileManager>(_path, option.sync);
     // read meta
-    _fm->read((char *)&_meta, sizeof(Meta), 0);
-    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages, _fm.get());
-    _pa = std::make_unique<PageAllocator>(_meta.freelist_id, 
-                                          _fm.get(), _meta.page_size);
+    g_fm->read((char *)&_meta, sizeof(Meta), 0);
+    g_pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
+    g_pa = std::make_unique<PageAllocator>(_meta.freelist_id);
     _buckets = std::make_shared<Bptree>(
-        "__BUCKET_TREE__", _meta.bucket_tree_meta, this, std::less<std::string_view>());
+        "__BUCKET_TREE__", _meta.bucket_tree_meta, std::less<std::string_view>());
 
     return Status();
 }
 Status DBImpl::create(std::string path, Option option) {
 
+    g_option = option;
     // create file 
     std::fstream file(path, std::ios::out);
     if(!file.is_open()) {
@@ -93,33 +97,31 @@ void DBImpl::init(Option option) {
     tree_meta->order = 96;
 
     // create filemanager firstly
-    _fm = std::make_shared<FileManager>(_path, option.sync);
+    g_fm = std::make_unique<FileManager>(_path, option.sync);
 
     // write meta
-    _fm->write((char *)&_meta, sizeof(_meta), 0);
+    g_fm->write((char *)&_meta, sizeof(_meta), 0);
     // init pageAllocator on disk
-    PageAllocator::newOnDisk(_meta.freelist_id, _fm.get(), 
-                             _meta.page_size, _meta.freelist_id + 2);
+    PageAllocator::newOnDisk(_meta.freelist_id, _meta.freelist_id + 2);
 
     // create basic utils
-    _pc = std::make_unique<PageCache>(_meta.max_buffer_pages, _fm.get());
-    _pa = std::make_unique<PageAllocator>(_meta.freelist_id, _fm.get(), 
-                                          _meta.page_size);
+    g_pc = std::make_unique<PageCache>(_meta.max_buffer_pages);
+    g_pa = std::make_unique<PageAllocator>(_meta.freelist_id);
 
     auto meta = _meta.bucket_tree_meta;
     // the id of bucket must be 2
     // init bucket on disk
-    Bptree::newOnDisk(meta.root, _fm.get(), _meta.page_size);
+    Bptree::newOnDisk(meta.root);
     // create bucket tree
     _buckets = std::make_shared<Bptree>(
-        "__BUCKET_TREE__", meta, this, std::less<std::string_view>());
+        "__BUCKET_TREE__", meta, std::less<std::string_view>());
 }
 
 std::tuple<Status, Bucket> 
 DBImpl::createBucket(std::string name, comparator_t cmp) {
 
     BptreeMeta meta;
-    auto id = _pa->allocPage(1);
+    auto id = g_pa->allocPage(1);
     meta.root = id;
     meta.first = id;
     meta.height = 1;
@@ -131,12 +133,12 @@ DBImpl::createBucket(std::string name, comparator_t cmp) {
     auto stat =  _buckets->put(name, val);
     if(!stat.ok()) {
         // rollback
-        _pa->freePage(id, 1);
+        g_pa->freePage(id, 1);
         return std::forward_as_tuple(stat, Bucket());
     }
-    Bptree::newOnDisk(meta.root, _fm.get(), _meta.page_size);
+    Bptree::newOnDisk(meta.root);
     return std::forward_as_tuple(
-        stat, Bucket(std::make_shared<Bptree>(name, meta, this, cmp)));
+        stat, Bucket(std::make_shared<Bptree>(name, meta, cmp)));
 }
 
 std::tuple<Status, Bucket> 
@@ -149,7 +151,7 @@ DBImpl::getBucket(std::string name, comparator_t cmp) {
     }
     std::memcpy(&meta, val.data(), sizeof(BptreeMeta));
     return std::forward_as_tuple(
-        stat, Bucket(std::make_shared<Bptree>(name, meta, this, cmp)));
+        stat, Bucket(std::make_shared<Bptree>(name, meta, cmp)));
 }
 
 void DBImpl::updateRoot(std::string &name, pgid_t newroot, u32 height) {
@@ -168,7 +170,7 @@ void DBImpl::updateRoot(std::string &name, pgid_t newroot, u32 height) {
 }
 
 void DBImpl::show() {
-    _pa->show();
+    g_pa->show();
 }
-
 }// namespace bptdb
+

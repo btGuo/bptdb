@@ -5,6 +5,7 @@
 #include <new>
 #include <shared_mutex>
 #include <cassert>
+#include "common.h"
 
 namespace bptdb {
 

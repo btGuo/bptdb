@@ -15,6 +15,8 @@ struct Option {
     bool sync{false};
 };
 
+extern Option g_option;
+
 }// namespace bptdb
 
 

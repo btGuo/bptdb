@@ -16,16 +16,13 @@
 #include "FileManager.h"
 #include "PageAllocator.h"
 #include "PageCache.h"
-#include "Page.h"
-#include "DBImpl.h"
 
 namespace bptdb {
 
 template <typename NodeType>
 class NodeMap {
 public:
-    NodeMap(u32 order, DBImpl *db, comparator_t cmp) {
-        _db = db;
+    NodeMap(u32 order, comparator_t cmp) {
         _order = order;
         _cmp = cmp;
     }
@@ -35,7 +32,7 @@ public:
         if(ret != _map.end()) {
             return ret->second.get();
         }
-        auto node = std::make_unique<NodeType>(id, _order, _db, this, _cmp);
+        auto node = std::make_unique<NodeType>(id, _order, this, _cmp);
         auto raw = node.get();
         _map.insert({id, std::move(node)});
         return raw;
@@ -46,7 +43,6 @@ public:
     }
 private:
     u32 _order{0};
-    DBImpl *_db{nullptr};
     comparator_t _cmp;
     std::mutex _mtx;
     std::unordered_map<pgid_t, 
@@ -69,10 +65,9 @@ struct DelEntry {
 
 class Node {
 public:
-    Node(pgid_t id, u32 maxsize, DBImpl *db) {
+    Node(pgid_t id, u32 maxsize) {
         _id      = id;
         _maxsize = maxsize;
-        _db      = db;
     }
     std::shared_mutex &getMutex() {
         return _shmtx;
@@ -94,11 +89,10 @@ protected:
         return hdr->size > _maxsize / 2;
     }
     u32 byte2page(u32 bytes) {
-        return (bytes + _db->getPageSize() - 1) / _db->getPageSize();
+        return (bytes + g_option.page_size - 1) / g_option.page_size;
     }
 
     pgid_t _id{0};
-    DBImpl *_db{nullptr};
     u32    _maxsize{0};
     std::shared_mutex _shmtx;
 };

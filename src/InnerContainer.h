@@ -11,10 +11,11 @@
 #include <algorithm>
 #include <tuple>
 #include "common.h"
+#include "Option.h"
+#include "Node.h"
 
 namespace bptdb {
 
-class DelEntry;
 
 static inline u32 roundup(u32 size) {
     return size - size / 2;
@@ -211,9 +212,11 @@ public:
         updateVec();
     }
     u32 elemSize(std::string &key, pgid_t val) { 
+        (void)val;
         return sizeof(Elem) + key.size(); 
     }
     u32 elemSize(std::string &&key, pgid_t val) {
+        (void)val;
         return sizeof(Elem) + key.size(); 
     }
     bool raw() { return !_data; }

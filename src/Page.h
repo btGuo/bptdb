@@ -2,16 +2,19 @@
 #define __PAGE_H
 
 #include <atomic>
-#include <vector>
-#include <shared_mutex>
-#include <memory>
 #include <cstdlib>
-#include "List.h"
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+
 #include "FileManager.h"
 #include "common.h"
+#include "List.h"
+#include "Option.h"
 
 namespace bptdb {
-
+ 
 struct PageHeader {
     u32    hdrpages;
     u32    realpages;
@@ -32,45 +35,58 @@ struct PageHeader {
     }
 };
 
-
-class PageAllocator;
-
-class Page { 
-    friend class PageAllocator;
+class Page {
 public:
-    Page(pgid_t id, u32 page_size, u32 data_pgs);
-    Page(pgid_t id, u32 page_size);
-    ~Page();
-    void *read(FileManager *fm);
-    void *extend(PageAllocator *pa, u32 extbytes);
-    void write(FileManager *fm);
-    void free(PageAllocator *pa);
-    static void writeBatch(FileManager *fm, 
-                           std::vector<std::shared_ptr<Page>> &pages);
-    bool   overFlow(u32 extbytes);
-    void   *data() { return _data; }
-    pgid_t getId() { return _id; }
-    tag_declare(lru_tag, Page, _lru_tag); 
-
-    bool &used() { return _used; }
-
+    Page(pgid_t id): _id(id){
+    }
+    ~Page() { 
+        if (_data) {
+            std::free(_data); 
+        }
+    }
+    void read(void *dest) { 
+        std::shared_lock lg(_shmtx);
+        if (!_data) {
+            _data = std::malloc(g_option.page_size);
+            g_fm->read((char*)_data, 1, _id * g_option.page_size);
+        }
+        std::memcpy(dest, _data, g_option.page_size); 
+    }
+    void write(void *src) {
+        std::unique_lock lg(_shmtx);
+        if (!_data) {
+            _data = std::malloc(g_option.page_size);
+        }
+        std::memcpy(_data, src, g_option.page_size);
+        _dirty = true;
+    }
+    void flush() {
+        std::shared_lock lg(_shmtx);
+        if (!_dirty) {
+            return;
+        }
+        if (_data) {
+            g_fm->write((char*)_data, 1, _id * g_option.page_size);
+        }
+        _dirty.store(false);
+    }
+    pgid_t getId() {
+        return _id;
+    }
+    bool dirty() {
+        return _dirty.load();
+    }
+    tag_declare(lru_tag, Page, _lru_tag);
 private:
-    u32    byte2page(u32 bytes);
-    // read by page_size
-    void _readPage(FileManager *fm, char *buf, u32 cnt, u32 pos);
-    // write by page_size
-    void _writePage(FileManager *fm, char *buf, u32 cnt, u32 pos);
-
-    bool    _used{false};
-    pgid_t  _id{0};
-    u32     _page_size{0};
-    u32     _data_pgs{0}; // page len of _data
-    char    *_data{nullptr};
+    pgid_t _id{0};
+    void   *_data{nullptr};
     ListTag _lru_tag;
+    std::shared_mutex _shmtx;
+    std::atomic_bool  _dirty{false};
 };
 
 using PagePtr = std::shared_ptr<Page>;
-//using PagePtr = Page *;
+
 }// namespace bptdb
 
 #endif

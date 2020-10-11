@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <tuple>
 #include "common.h"
+#include "Option.h"
 
 namespace bptdb {
 
@@ -203,6 +204,7 @@ public:
 
     // the parameter ignore is for compatibility with InnerContainer 
     std::string borrowFrom(LeafContainer &other, std::string &ignore) {
+        (void)ignore;
         // convert string_view to string at once. other._keys[1] will 
         // be unavailable after other.pop_front().
         auto str = other._keys[1];
@@ -214,6 +216,7 @@ public:
 
     // the parameter ignore is for compatibility with InnerContainer 
     void mergeFrom(LeafContainer &other, std::string &ignore) {
+        (void)ignore;
         *_size += *other._size;
         // we should not use other._bytes which include the 
         // node header bytes

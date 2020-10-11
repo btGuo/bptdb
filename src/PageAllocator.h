@@ -5,8 +5,7 @@
 #include <mutex>
 #include <memory>
 #include "common.h"
-#include "FileManager.h"
-#include "Page.h"
+#include "PageHelper.h"
 
 namespace bptdb {
 
@@ -16,9 +15,8 @@ public:
         pgid_t pos;
         u32    len;
     }; 
-    static void newOnDisk(pgid_t root, FileManager *fm, 
-            u32 page_size, u32 start_pos);
-    PageAllocator(pgid_t root, FileManager *fm, u32 page_size);
+    static void newOnDisk(pgid_t root, u32 start_pos);
+    PageAllocator(pgid_t root);
     pgid_t allocPage(u32 len);
     // free page at pos of len.
     void freePage(pgid_t pos, u32 len);
@@ -31,13 +29,13 @@ private:
     bool adjacent(Elem *p1, Elem *p2) {
         return p1->pos + p1->len == p2->pos;
     }
-    u32                   _page_size{0};
     pgid_t                _root{0};
-    FileManager           *_fm{nullptr};
     Elem                  _tmp;
     std::recursive_mutex  _mtx;
-    std::unique_ptr<Page> _pg{nullptr};
+    std::unique_ptr<PageHelper> _pg{nullptr};
 };
+
+extern std::unique_ptr<PageAllocator> g_pa;
 
 }// namespace bptdb
 

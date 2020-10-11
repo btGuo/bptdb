@@ -48,6 +48,8 @@ private:
     bool         _sync;
 };
 
+extern std::unique_ptr<FileManager> g_fm;
+
 }// namespace bptdb
 
 #endif

@@ -62,9 +62,8 @@ public:
         next_pg->write();
     }
 
-    bool borrow(DelEntry &entry) {
+    bool borrow(PageHeader *hdr, PageHelperPtr pg, DelEntry &entry) {
 
-        auto [hdr, pg] = handlePage();
         auto next = _map->get(hdr->next);
         auto [next_hdr, next_pg] = next->handlePage();
         auto &next_container = next->_container;
@@ -83,9 +82,8 @@ public:
         return true;
     }
 
-    void merge(DelEntry &entry) {
+    void merge(PageHeader *hdr, PageHelperPtr pg, DelEntry &entry) {
 
-        auto [hdr, pg] = handlePage();
         auto next = _map->get(hdr->next);
         auto [next_hdr, next_pg] = next->handlePage();
         auto &next_container = next->_container;
@@ -183,11 +181,11 @@ public:
             goto done;
         }
         DEBUGOUT("===> leafnode borrow");
-        if(borrow(entry)) {
+        if(borrow(hdr, pg, entry)) {
             goto done;
         }
         DEBUGOUT("===> leafnode merge");
-        merge(entry);
+        merge(hdr, pg, entry);
 done:
         pg->write();
             

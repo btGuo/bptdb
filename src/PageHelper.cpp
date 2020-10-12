@@ -100,6 +100,7 @@ void PageHelper::write() {
 }
 
 void PageHelper::_readPage(char *buf, u32 cnt, u32 pos) {
+    // g_fm->read(buf, cnt * g_option.page_size, pos * g_option.page_size);
     for (u32 i = 0; i < cnt; i++) {
         g_pc->read(pos, buf);
         pos++;
@@ -108,6 +109,7 @@ void PageHelper::_readPage(char *buf, u32 cnt, u32 pos) {
 }
 
 void PageHelper::_writePage(char *buf, u32 cnt, u32 pos) {
+    // g_fm->write(buf, cnt * g_option.page_size, pos * g_option.page_size);
     for (u32 i = 0; i < cnt; i++) {
         g_pc->write(pos, buf);
         pos++;

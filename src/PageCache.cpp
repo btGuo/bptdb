@@ -46,10 +46,11 @@ PagePtr PageCache::insertNew(pgid_t id) {
     auto pg = std::make_shared<Page>(id);
     _page_count++;
     if (_page_count > _max_page) {
+        DEBUGOUT("page drop out");
         auto pg = _lru.pop_back();
+        pg->flush();
         _cache.erase(pg->getId());
         _page_count--;
-        pg->flush();
     }
     _cache.insert({pg->getId(), pg});
     _lru.push_front(pg.get());

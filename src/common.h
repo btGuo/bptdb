@@ -8,8 +8,6 @@
 #include <cstdio>
 #include <functional>
 
-#define DEBUG 1
-
 namespace bptdb {
 
 #ifdef DEBUG

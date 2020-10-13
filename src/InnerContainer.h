@@ -174,7 +174,8 @@ public:
         *other._head = elem->val;
 
         *other._size += rentsize;
-        *other._bytes += rentbytes;
+        // add head size !!!
+        *other._bytes += (rentbytes + sizeof(pgid_t));
         other._end = other._data + rentbytes;
         std::memcpy(other._data, it, rentbytes);
         other.updateVec();

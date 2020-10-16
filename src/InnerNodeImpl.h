@@ -1,7 +1,9 @@
 #ifndef __INNER_CONTAINER_1_H
 #define __INNER_CONTAINER_1_H
 
+#include <ios>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,8 +13,10 @@
 #include <algorithm>
 #include <tuple>
 #include "common.h"
-#include "Option.h"
 #include "Node.h"
+#include "Option.h"
+#include "PageHeader.h"
+#include "PageHelper.h"
 
 namespace bptdb {
 
@@ -21,7 +25,7 @@ static inline u32 roundup(u32 size) {
     return size - size / 2;
 }
 
-class InnerContainer {
+class InnerNodeImpl {
 public:
     struct Elem {
         u32 keylen;
@@ -33,10 +37,10 @@ public:
     }
 
     class Iterator {
-        friend class InnerContainer;
+        friend class InnerNodeImpl;
     public:
         Iterator() = default;
-        Iterator(u32 pos, InnerContainer *con) {
+        Iterator(u32 pos, InnerNodeImpl *con) {
             _pos = pos;
             _con = con;
         }
@@ -50,7 +54,7 @@ public:
         }
     private:
         u32           _pos{0};
-        InnerContainer *_con{nullptr};
+        InnerNodeImpl *_con{nullptr};
     };
 
     Iterator begin() {
@@ -79,20 +83,39 @@ public:
     }
 
     void verify() {
-        return;
-        for(u32 i = 1; i < _keys.size(); i++) {
-            assert(_keys[i] > _keys[i - 1]);
-        }
+        // for(u32 i = 1; i < _keys.size(); i++) {
+        //     assert(_keys[i] > _keys[i - 1]);
+        // }
     }
 
     // =======================================
-    InnerContainer() = default;
-    InnerContainer(comparator_t cmp): _cmp(cmp){}
-    InnerContainer(InnerContainer &other): _cmp(other._cmp){}
-    ~InnerContainer(){ _keys.clear(); }
+    InnerNodeImpl(pgid_t id, comparator_t cmp) {
+        _pg = std::make_shared<PageHelper>(id);
+        _cmp = cmp;
+        _pg->read();
+        reset();
+    }
 
-    // init an InnerContainer we must have a key and two child.
+    void reset() {
+        _hdr = (PageHeader *)_pg->data();
+        _size  = &_hdr->size;
+        _bytes = &_hdr->bytes;
+        _head  = (pgid_t *)(_hdr + 1);
+        _data  = (char *)(_head + 1);
+        updateVec();
+    }
+    // =================================================
+
+    void handleOverFlow(u32 extbytes) {
+        if (_pg->overFlow(extbytes)) {
+            _pg->extend(extbytes);
+            reset();
+        } 
+    }
+
+    // init an InnerNodeImpl we must have a key and two child.
     void init(std::string &key, pgid_t child1, pgid_t child2) {
+        handleOverFlow(elemSize(key, child1) + sizeof(child2));
         (*_bytes) += sizeof(pgid_t);
         (*_head) = child1;
         _put(_data, key, child2);
@@ -100,6 +123,8 @@ public:
 
     // put key and val at pos
     void putat(u32 pos, std::string &key, pgid_t val) {
+        verify();
+        handleOverFlow(elemSize(key, val));
         assert(pos <= *_size);
         if(pos == *_size) {
             push_back(key, val);
@@ -118,15 +143,18 @@ public:
     // update key at pos
     void updateKeyat(u32 pos, std::string &newkey) {
         verify();
+        handleOverFlow(newkey.size());
         assert(pos < *_size);
         _updateKey(const_cast<char *>(_keys[pos].data() - sizeof(Elem)), newkey);
     }
 
     std::tuple<pgid_t, u32> get(std::string &key) {
         verify();
+        /* 
         for(u32 i = 1; i < _keys.size(); i++) {
             assert(_keys[i] > _keys[i - 1]);
         }
+        */
         // 这里upper_bound
         auto ret = std::upper_bound(
             _keys.begin(), _keys.end(), key, _cmp);
@@ -137,10 +165,9 @@ public:
         Elem *elem = (Elem *)(ret->data() - sizeof(Elem));
         return std::make_tuple(elem->val, pos);
     }
-    std::tuple<pgid_t, u32> get(std::string &key, 
-                                DelEntry &entry) {
 
-        verify();
+    std::tuple<pgid_t, u32> get(
+            std::string &key, DelEntry &entry) {
 
         auto ret = std::upper_bound(
             _keys.begin(), _keys.end(), key, _cmp);
@@ -159,7 +186,8 @@ public:
         Elem *elem = (Elem *)(ret->data() - sizeof(Elem));
         return std::make_tuple(elem->val, pos);
     }
-    std::string splitTo(InnerContainer &other) {
+
+    std::string splitTo(InnerNodeImpl &other) {
         u32 pos = roundup(*_size);
         auto str = _keys[pos];
         char *it = const_cast<char *>(str.data() - sizeof(Elem));
@@ -171,8 +199,9 @@ public:
         u32 rentbytes = (_end - it);
         u32 rentsize = (*_size - pos);
 
-        *other._head = elem->val;
+        other.handleOverFlow(rentbytes + sizeof(pgid_t));
 
+        *other._head = elem->val;
         *other._size += rentsize;
         // add head size !!!
         *other._bytes += (rentbytes + sizeof(pgid_t));
@@ -186,17 +215,19 @@ public:
         updateVec();
         return ret;
     }
-    void mergeFrom(InnerContainer &other, std::string &str) {
-        verify();
+
+    void mergeFrom(InnerNodeImpl &other, std::string &str) {
         push_back(str, *other._head);
-        *_size += *other._size;
         u32 bytes = other._end - other._data;
+        handleOverFlow(bytes);
+        *_size += *other._size;
         *_bytes += bytes;
         std::memcpy(_end, other._data, bytes);
         _end += bytes;
         updateVec();
     }
-    std::string borrowFrom(InnerContainer &other, std::string delim) {
+
+    std::string borrowFrom(InnerNodeImpl &other, std::string delim) {
         auto ret = std::string(other._keys[0]);
         //assert(ret >= delim);
         push_back(delim, *other._head);
@@ -204,24 +235,17 @@ public:
         other.pop_front();
         return ret;
     }
-    void reset(u32 *bytes, 
-            u32 *size, char *ptr) {
-        _size  = size;
-        _bytes = bytes;
-        _head  = (pgid_t *)ptr;
-        _data  = (char *)(_head + 1);
-        updateVec();
-    }
+
     u32 elemSize(std::string &key, pgid_t val) { 
-        (void)val;
-        return sizeof(Elem) + key.size(); 
-    }
-    u32 elemSize(std::string &&key, pgid_t val) {
         (void)val;
         return sizeof(Elem) + key.size(); 
     }
     bool raw() { return !_data; }
     u32 size() { return *_size; }
+    void write(){ _pg->write(); }
+    u32 next(){ return _hdr->next;}
+    void setNext(u32 next) { _hdr->next = next; }
+    void free() { _pg->free(); }
 
 private:
 
@@ -243,6 +267,7 @@ private:
     }
 
     void push_back(std::string &key, pgid_t val) {
+        handleOverFlow(elemSize(key, val));
         _put(_end, key, val);
     }
 
@@ -298,13 +323,15 @@ private:
         return elem->keylen + sizeof(Elem);
     }
 
+    comparator_t   _cmp;
     std::vector<std::string_view> _keys;
     char   *_data{nullptr};
     char   *_end{nullptr};
-    comparator_t   _cmp;
     pgid_t *_head{nullptr};
     u32    *_size{nullptr};
     u32    *_bytes{nullptr};
+    PageHeader *_hdr{nullptr};
+    PageHelperPtr _pg;
 };
 
 }// namespace bptdb

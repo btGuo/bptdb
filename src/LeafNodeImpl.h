@@ -1,6 +1,7 @@
 #ifndef __LEAF_CONTAINER_H
 #define __LEAF_CONTAINER_H
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,30 +12,32 @@
 #include <tuple>
 #include "common.h"
 #include "Option.h"
+#include "PageHelper.h"
+#include "PageHeader.h"
 
 namespace bptdb {
 
-class LeafContainer {
+class LeafNodeImpl {
 public:
     struct Elem {
         u32 keylen;
         u32 vallen;
     };
     class Iterator {
-        friend class LeafContainer;
+        friend class LeafNodeImpl;
     public:
         Iterator() = default;
-        Iterator(u32 pos, LeafContainer *con) {
+        Iterator(u32 pos, LeafNodeImpl *impl) {
             _pos = pos;
-            _con = con;
+            _impl = impl;
         }
         void next() {
             _pos++;
         }
-        std::string_view key() { return _con->_keys[_pos]; }
+        std::string_view key() { return _impl->_keys[_pos]; }
         std::string_view val() { return key2val(key());    }
         bool done() {
-            return _pos == *(_con->_size);    
+            return _pos == *(_impl->_size);    
         }
     private:
         std::string_view key2val(std::string_view key) {
@@ -42,8 +45,8 @@ public:
             return std::string_view(
                 key.data() + elem->keylen, elem->vallen);
         }
-        u32           _pos{0};
-        LeafContainer *_con{nullptr};
+        u32 _pos{0};
+        LeafNodeImpl *_impl{nullptr};
     };
 
     std::string_view minkey() {
@@ -83,22 +86,50 @@ public:
         }
         return Iterator(it - _keys.begin(), this);
     }
+
     //================================================
-    LeafContainer(comparator_t cmp): _cmp(cmp) {}
-    LeafContainer(LeafContainer &other): _cmp(other._cmp) {}
-    ~LeafContainer(){ _keys.clear(); }
+
+    LeafNodeImpl(pgid_t id, comparator_t cmp) {
+        _pg = std::make_shared<PageHelper>(id);
+        _cmp = cmp;
+        _pg->read();
+        reset();
+    }
+
+    void reset() {
+        _hdr = (PageHeader *)_pg->data();
+        _bytes = &_hdr->bytes;
+        _size = &_hdr->size;
+        _data = (char *)(_hdr + 1);
+        // notice! we don't set the _end here.
+        updateVec();
+    }
+
+    // ============================================
+
+    void handleOverFlow(u32 extbytes) {
+        if (_pg->overFlow(extbytes)) {
+            _pg->extend(extbytes);
+            reset();
+        } 
+    }
+
+    // ============================================
 
     void verify() {
-        return;
-        for(u32 i = 1; i < _keys.size(); i++) {
-            assert(_keys[i] > _keys[i - 1]);
-        }
+        // for(u32 i = 1; i < _keys.size(); i++) {
+        //     assert(_keys[i] > _keys[i - 1]);
+        // }
     }
 
     void push_back(std::string &&key, std::string &&val) {
+        handleOverFlow(elemSize(key, val));
         _put(_end, key, val);
     }
+
     bool put(std::string &key, std::string &val) {
+        verify();
+        handleOverFlow(elemSize(key, val));
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
 
@@ -114,12 +145,15 @@ public:
         _put(it, key, val);
         return true;
     }
+
     bool find(std::string &key) {
-        //updateVec();
+        verify();
         return std::binary_search(
             _keys.begin(), _keys.end(), key, _cmp);
     }
+
     bool get(std::string &key, std::string &val) {
+        verify();
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
         if(ret == _keys.end() || _cmp(key, *ret)) {
@@ -154,7 +188,10 @@ public:
         _del(it);
         return true;
     }
+
     bool update(std::string &key, std::string &val) {
+        verify();
+        handleOverFlow(elemSize(key, val));
         auto ret = std::lower_bound(
             _keys.begin(), _keys.end(), key, _cmp);
 
@@ -176,19 +213,21 @@ public:
         updateVec();
         return true;
     }
+
     void pop_front() {
         _del(_data);
     }
 
-    std::string splitTo(LeafContainer &other) {
+    std::string splitTo(LeafNodeImpl &other) {
         auto pos = *_size / 2;
         auto str = _keys[pos];
         auto it = str.data() - sizeof(Elem);
-        //XXX
+        // return string instead of string_view
         auto ret = std::string(str.data(), str.size());
         u32 rentbytes = (_end - it);
         u32 rentsize = (*_size - pos);
 
+        other.handleOverFlow(rentbytes);
         *other._size += rentsize;
         *other._bytes += rentbytes;
         other._end = other._data + rentbytes;
@@ -202,9 +241,7 @@ public:
         return ret;
     }
 
-    // the parameter ignore is for compatibility with InnerContainer 
-    std::string borrowFrom(LeafContainer &other, std::string &ignore) {
-        (void)ignore;
+    std::string borrowFrom(LeafNodeImpl &other) {
         // convert string_view to string at once. other._keys[1] will 
         // be unavailable after other.pop_front().
         auto str = other._keys[1];
@@ -214,34 +251,26 @@ public:
         return ret;
     }
 
-    // the parameter ignore is for compatibility with InnerContainer 
-    void mergeFrom(LeafContainer &other, std::string &ignore) {
-        (void)ignore;
-        *_size += *other._size;
+    void mergeFrom(LeafNodeImpl &other) {
         // we should not use other._bytes which include the 
         // node header bytes
         u32 bytes = other._end - other._data;
+        handleOverFlow(bytes);
+        *_size += *other._size;
         *_bytes += bytes;
         std::memcpy(_end, other._data, bytes);
         _end += bytes;
         updateVec();
     }
-    u32 elemSize(std::string &key, std::string &val) { 
+    static u32 elemSize(std::string &key, std::string &val) { 
         return sizeof(Elem) + key.size() + val.size(); 
-    }
-    u32 elemSize(std::string &&key, std::string &&val) { 
-        return sizeof(Elem) + key.size() + val.size(); 
-    }
-    void reset(u32 *bytes, 
-            u32 *size, char *data) {
-        _size = size;
-        _bytes = bytes;
-        _data = data;
-        // notice! we don't set the _end here.
-        updateVec();
     }
     u32 size() { return *_size; }
     bool raw() { return !_data; }
+    void write(){ _pg->write(); }
+    u32 next(){ return _hdr->next;}
+    void setNext(u32 next) { _hdr->next = next; }
+    void free() { _pg->free(); }
 private:
     //put key and val at pos it
     void _put(char *it, std::string &key, std::string &val) {
@@ -275,15 +304,19 @@ private:
         }
         _end = data;
     }
+
+
     comparator_t _cmp;
-    // memory
     std::vector<std::string_view> _keys;
     char *_end{nullptr};
-    // disk
     u32 *_bytes{nullptr};
     char *_data{nullptr};
     u32 *_size{nullptr};
+    PageHeader *_hdr{nullptr};
+    PageHelperPtr _pg;
 };
+
+using LeafNodeImplPtr = std::shared_ptr<LeafNodeImpl>;
 
 }// namespace bptdb
 #endif

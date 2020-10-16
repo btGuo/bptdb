@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <functional>
 
+#include "Option.h"
+
 namespace bptdb {
 
 #ifdef DEBUG
@@ -40,6 +42,10 @@ struct BptreeMeta {
     u32 height;
     u32 order;
 };
+
+static inline u32 byte2page(u32 bytes) {
+    return (bytes + g_option.page_size - 1) / g_option.page_size;
+}
 
 }// namespace bptdb
 #endif

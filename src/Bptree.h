@@ -40,14 +40,14 @@ public:
                     _done = true;
                     return;
                 }
-                std::tie(it, pg) = node->begin();
+                std::tie(it, impl) = node->begin();
             }
         }
     private:
         bool _done{false};
         LeafNode *node{nullptr};
         Iter_t it;
-        PageHelperPtr pg;
+        LeafNodeImplPtr impl;
     };
 
     // ====================================================
@@ -56,7 +56,7 @@ public:
         auto node = _leaf_map.get(_first);
         auto it = std::make_shared<Iterator>();
         it->node = node;
-        std::tie(it->it, it->pg) = node->begin();
+        std::tie(it->it, it->impl) = node->begin();
         return it;
     }
 
@@ -65,7 +65,7 @@ public:
         auto node = _leaf_map.get(nodeid);
         auto it = std::make_shared<Iterator>();
         it->node = node;
-        std::tie(it->it, it->pg) = node->at(key);
+        std::tie(it->it, it->impl) = node->at(key);
         return it;
     }
     // ====================================================
@@ -101,6 +101,7 @@ public:
     }
 
     Status put(std::string &key, std::string &val) {
+        // std::lock_guard lg(_root_mtx);
         {
             //try put at first.
             _root_mtx.lock_shared();
@@ -132,7 +133,7 @@ public:
         auto prev = _root;
         _root = g_pa->allocPage(1);
         //std::cout << "root " << prev << " change to " << _root << "\n";
-        InnerNode::newOnDisk(_root, entry.key, prev, entry.val);
+        InnerNode::newOnDisk(_root, entry.key, prev, entry.val, _cmp);
 
         _height++;
         g_db->updateRoot(_name, _root, _height);

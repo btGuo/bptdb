@@ -73,23 +73,20 @@ public:
         return _shmtx;
     }
 protected:
-    bool safetoput(PageHeader *hdr) {
-        return hdr->size < _maxsize;
+    bool safetoput(u32 size) {
+        return size < _maxsize;
     }
-    bool ifsplit(PageHeader *hdr) {
-        return hdr->size > _maxsize;
+    bool ifsplit(u32 size) {
+        return size > _maxsize;
     }
-    bool safetodel(PageHeader *hdr) {
-        return hdr->size > _maxsize / 2;
+    bool safetodel(u32 size) {
+        return size > _maxsize / 2;
     }
-    bool ifmerge(PageHeader *hdr) {
-        return hdr->size < _maxsize / 2;
+    bool ifmerge(u32 size) {
+        return size < _maxsize / 2;
     }
-    bool hasmore(PageHeader *hdr) {
-        return hdr->size > _maxsize / 2;
-    }
-    u32 byte2page(u32 bytes) {
-        return (bytes + g_option.page_size - 1) / g_option.page_size;
+    bool hasmore(u32 size) {
+        return size > _maxsize / 2;
     }
 
     pgid_t _id{0};

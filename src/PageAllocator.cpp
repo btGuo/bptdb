@@ -4,6 +4,8 @@
 #include "PageAllocator.h"
 #include "DB.h"
 #include "PageCache.h"
+#include "PageHeader.h"
+#include "common.h"
 
 namespace bptdb {
 
@@ -124,7 +126,7 @@ pgid_t PageAllocator::reallocPage(pgid_t pos, u32 len, u32 newlen) {
 void *PageAllocator::extendPage(u32 extbytes) {
     assert(_pg->_data);
     auto hdr = (PageHeader *)_pg->_data;
-    u32 extpages = _pg->byte2page(hdr->bytes + extbytes) - _pg->_data_pgs;
+    u32 extpages = byte2page(hdr->bytes + extbytes) - _pg->_data_pgs;
     _pg->_data_pgs += extpages;
 
     // we have not enought space on disk, realloc on disk.

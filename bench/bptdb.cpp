@@ -26,23 +26,25 @@ void put(vector<pair<string, string>> &kvs, bptdb::Bucket bucket) {
     }
 }
 
-void multi_put(vector<pair<string, string>> &kvs, bptdb::Bucket bucket) {
-    int size = kvs.size();
-
-    thread p1([bucket, &kvs, size]()mutable{
-        for(int i = 0; i < size / 2; i++) {
-            assert(bucket.put(kvs[i].first, kvs[i].second).ok());
-        }
-    });
-
-    thread p2([bucket, &kvs, size]()mutable{
-        for(int i = size / 2; i < size; i++) {
-            assert(bucket.put(kvs[i].first, kvs[i].second).ok());
-        }
-    });
-
-    p1.join();
-    p2.join();
+void multi_put(vector<pair<string, string>> &kvs, bptdb::Bucket bucket, int nums) {
+    vector<thread> vec;
+    int batch_size = kvs.size() / nums;
+    for (int i = 0, j = 0; i < nums; i++, j+=batch_size) {
+        vec.emplace_back([&kvs, bucket](int begin, int end) mutable {
+            // cout << "thread " << std::this_thread::get_id() << " start...\n";
+            for (int k = begin; k < end; k++) {
+                auto stat = bucket.put(kvs[k].first, kvs[k].second);
+                if (!stat.ok()) {
+                    cout << stat.getErrmsg() << endl;
+                    assert(0);
+                }
+            }
+            // cout << "thread " << std::this_thread::get_id() << " stop\n";
+        }, j, j+batch_size);
+    }
+    for (int i = 0; i < nums; i++) {
+        vec[i].join();
+    }
 }
 
 void del(vector<pair<string, string>> &kvs, bptdb::Bucket bucket) {
@@ -91,13 +93,13 @@ void iter(vector<pair<string, string>> &kvs, bptdb::Bucket bucket) {
 int main(int argc, char **argv) {
 
     if(argc < 3) {
-        cout << "usage: " << argv[0] << " [option] [size]\n";
+        cout << "usage: " << argv[0] << " [option] [size] [thread nums]\n";
         cout << "\toption: [1]put, [2]delete, [3]get, [4]getbyiter\n";
         return 0;
     }
     int option = std::atoi(argv[1]);
     int size   = std::atoi(argv[2]);
-    bool multi = false;
+    int thread_nums = argc < 4 ? 1 : std::atoi(argv[3]);
 
     // open database and get bucket.
     bptdb::DB db;
@@ -120,11 +122,9 @@ int main(int argc, char **argv) {
     auto start = chrono::system_clock::now();
 
     if(option == 1) {
-        if(multi) multi_put(kvs, bucket);
-        else put(kvs, bucket);
+        multi_put(kvs, bucket, thread_nums);
     }else if(option == 2) {
-        if(multi) multi_del(kvs, bucket);
-        else del(kvs, bucket);
+        multi_del(kvs, bucket);
     }else if(option == 3) {
         get(kvs, bucket);
     }else if(option == 4) {

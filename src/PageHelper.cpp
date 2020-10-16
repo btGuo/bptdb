@@ -6,6 +6,7 @@
 #include "PageHelper.h"
 #include "Option.h"
 #include "PageCache.h"
+#include "PageHeader.h"
 
 namespace bptdb {
 
@@ -80,12 +81,6 @@ void *PageHelper::extend(u32 extbytes) {
     return _data;
 }
 
-void PageHelper::writeBatch(std::vector<std::shared_ptr<PageHelper>> &pages) {
-    for(auto &pg: pages) {
-        pg->write();
-    }
-}
-
 void PageHelper::write() {
     assert(_data);
     auto hdr = (PageHeader *)_data;
@@ -115,10 +110,6 @@ void PageHelper::_writePage(char *buf, u32 cnt, u32 pos) {
         pos++;
         buf += g_option.page_size;
     }
-}
-
-u32 PageHelper::byte2page(u32 bytes) {
-    return (bytes + g_option.page_size - 1) / g_option.page_size;
 }
 
 bool PageHelper::overFlow(u32 extbytes) {

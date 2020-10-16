@@ -22,13 +22,11 @@ public:
     void *extend(u32 extbytes);
     void write();
     void free();
-    static void writeBatch(std::vector<std::shared_ptr<PageHelper>> &pages);
     bool   overFlow(u32 extbytes);
     void   *data() { return _data; }
     pgid_t getId() { return _id; }
 
 private:
-    u32    byte2page(u32 bytes);
     // read by page_size
     void _readPage(char *buf, u32 cnt, u32 pos);
     // write by page_size

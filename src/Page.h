@@ -18,25 +18,21 @@ namespace bptdb {
 class Page {
 public:
     Page(pgid_t id): _id(id){
+        _data = std::malloc(g_option.page_size);
+        g_fm->read((char*)_data, g_option.page_size, _id * g_option.page_size);
     }
     ~Page() { 
-        if (_data) {
-            std::free(_data); 
+        if (_dirty) {
+            g_fm->write((char*)_data, g_option.page_size, _id * g_option.page_size);
         }
+        std::free(_data); 
     }
     void read(void *dest) { 
         std::shared_lock lg(_shmtx);
-        if (!_data) {
-            _data = std::malloc(g_option.page_size);
-            g_fm->read((char*)_data, g_option.page_size, _id * g_option.page_size);
-        }
         std::memcpy(dest, _data, g_option.page_size); 
     }
     void write(void *src) {
         std::unique_lock lg(_shmtx);
-        if (!_data) {
-            _data = std::malloc(g_option.page_size);
-        }
         std::memcpy(_data, src, g_option.page_size);
         _dirty = true;
     }
@@ -45,9 +41,7 @@ public:
         if (!_dirty) {
             return;
         }
-        if (_data) {
-            g_fm->write((char*)_data, g_option.page_size, _id * g_option.page_size);
-        }
+        g_fm->write((char*)_data, g_option.page_size, _id * g_option.page_size);
         _dirty.store(false);
     }
     pgid_t getId() {

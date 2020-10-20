@@ -1,6 +1,7 @@
 #ifndef __LIST_H
 #define __LIST_H
 
+#include <functional>
 #include <mutex>
 #include <type_traits>
 #include <utility>
@@ -27,6 +28,13 @@ public:
     void push_back(T *elem) {
         std::unique_lock lg(m_mtx);
         add(elem2tag(elem), m_head.prev, &m_head);
+        m_size++;
+    }
+    void move_to_front(T *elem) {
+        std::unique_lock lg(m_mtx);
+        assert(m_size);
+        erase(elem2tag(elem));
+        add(elem2tag(elem), &m_head, m_head.next);
         m_size++;
     }
     void push_front(T *elem) {
@@ -60,6 +68,14 @@ public:
     std::size_t size() {
         std::unique_lock lg(m_mtx);
         return m_size;
+    }
+    void for_each(std::function<void(T *)> f) {
+        std::unique_lock lg(m_mtx);
+        auto walk = m_head.next;
+        while(walk != &m_head) {
+            f(tag2elem(walk));
+            walk = walk->next;
+        }
     }
 private:
     ListTag *elem2tag(T *elem) {

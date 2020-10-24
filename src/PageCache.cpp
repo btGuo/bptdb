@@ -1,4 +1,4 @@
-#include <c++/8/bits/c++config.h>
+#include <algorithm>
 #include <functional>
 #include <future>
 #include <list>
@@ -36,8 +36,7 @@ PagePtr PageCache::tryGet(pgid_t id) {
         return std::shared_ptr<Page>();
     }
     auto pg = it->second;
-    _lru.erase(pg.get());
-    _lru.push_front(pg.get());
+    _lru.move_to_front(pg.get());
     return pg;
 }
 
@@ -46,10 +45,10 @@ PagePtr PageCache::insertNew(pgid_t id) {
     auto pg = std::make_shared<Page>(id);
     _page_count++;
     if (_page_count > _max_page) {
-        DEBUGOUT("page drop out");
-        auto pg = _lru.pop_back();
-        pg->flush();
-        _cache.erase(pg->getId());
+        auto raw = _lru.pop_back();
+        auto it = _cache.find(raw->getId());
+        it->second->flush();
+        _cache.erase(it);
         _page_count--;
     }
     _cache.insert({pg->getId(), pg});
@@ -67,10 +66,11 @@ void PageCache::read(pgid_t id, void *dest) {
 
 void PageCache::write(pgid_t id, void *src) {
     auto pg = tryGet(id);
-    if (!pg) {
-        pg = insertNew(id);
+    if (pg) {
+        pg->write(src);
+        return;
     }
-    pg->write(src);
+    g_fm->write((char *)src, g_option.page_size, id * g_option.page_size);
 }
 
 bool PageCache::alive() {
@@ -82,18 +82,16 @@ void PageCache::run() {
     auto pc = g_pc;
     while (pc->alive()) {
         auto dirty_pgs = pc->collectDirty();
-        for (std::size_t i = 0; i < dirty_pgs.size(); i++) {
-            dirty_pgs[i]->flush();
-        }
+        std::for_each(dirty_pgs.begin(), 
+                dirty_pgs.end(), [](PagePtr pg) { pg->flush(); });
         if (!pc->alive()) {
             break;
         }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(10));
     }
     auto dirty_pgs = pc->collectDirty();
-    for (std::size_t i = 0; i < dirty_pgs.size(); i++) {
-        dirty_pgs[i]->flush();
-    }
+    std::for_each(dirty_pgs.begin(), 
+            dirty_pgs.end(), [](PagePtr pg) { pg->flush(); });
     DEBUGOUT("PageCache stop...");
 }
 

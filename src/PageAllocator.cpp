@@ -105,7 +105,8 @@ void PageAllocator::freePage(pgid_t pos, u32 len) {
         hdr->bytes += sizeof(Elem);
         // 第一次extend不会realloc
         if(_tmp.len) {
-            freePage(_tmp.pos, _tmp.len);
+            // TODO free page safe, page leak here.
+            // freePage(_tmp.pos, _tmp.len);
         }
     }
     _pg->write();

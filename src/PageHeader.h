@@ -1,6 +1,8 @@
 #ifndef __PAGE_HEADER_H
 #define __PAGE_HEADER_H
 
+#include <cstdio>
+#include <string>
 #include "common.h"
 #include "PageHelper.h"
 
@@ -30,6 +32,15 @@ struct PageHeader {
         auto hdr = (PageHeader *)pg.data();
         PageHeader::init(hdr, len, next);
         pg.write();
+    }
+
+    static std::string toString(PageHeader *hdr) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), 
+                "hdrpages %u, realpages %u, bytes %u, res %u, size %u, next %u",
+                hdr->hdrpages, hdr->realpages, hdr->bytes, 
+                hdr->res, hdr->size, hdr->next);
+        return std::string(buf);
     }
 };
 

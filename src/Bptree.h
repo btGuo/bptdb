@@ -101,7 +101,6 @@ public:
     }
 
     Status put(std::string &key, std::string &val) {
-        // std::lock_guard lg(_root_mtx);
         {
             //try put at first.
             _root_mtx.lock_shared();
